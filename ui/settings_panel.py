@@ -102,12 +102,13 @@ class SettingsPanel(QWidget):
         self._translation_mode = QComboBox()
         self._translation_mode.addItem("Offline (Argos)", "offline")
         self._translation_mode.addItem("Online (LibreTranslate)", "online")
+        self._translation_mode.addItem("Local (LTEngine)", "ltengine")
         self._translation_mode.currentIndexChanged.connect(self._emit_change)
         mode_layout.addWidget(self._translation_mode)
         mode_layout.addStretch()
         trans_layout.addLayout(mode_layout)
 
-        self._translation_status = QLabel("Translation: Offline")
+        self._translation_status = QLabel("Translation: Not ready (checking engines...)")
         trans_layout.addWidget(self._translation_status)
 
         layout.addWidget(trans_group)

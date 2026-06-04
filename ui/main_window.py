@@ -260,6 +260,9 @@ class MainWindow(QMainWindow):
             # Poll model status
             QTimer.singleShot(2000, self._check_model_status)
 
+            # Poll translation engine status
+            QTimer.singleShot(1000, self._check_translation_status)
+
             logger.info("Capture started")
 
         except Exception as e:
@@ -318,6 +321,16 @@ class MainWindow(QMainWindow):
             if self._capturing:
                 QTimer.singleShot(2000, self._check_model_status)
 
+    def _check_translation_status(self):
+        """Update translation engine status indicator."""
+        if self._translation_worker:
+            self._settings_panel.set_translation_status(
+                self._translation_worker.status_detail
+            )
+            # Keep polling while engines are being checked
+            if not self._translation_worker._engines_checked:
+                QTimer.singleShot(2000, self._check_translation_status)
+
     @staticmethod
     def _clear_queue(q: queue.Queue):
         """Clear all items from a queue."""
@@ -341,7 +354,7 @@ class MainWindow(QMainWindow):
         # Update translation status if worker is running
         if self._translation_worker:
             self._settings_panel.set_translation_status(
-                self._translation_worker.status.capitalize()
+                self._translation_worker.status_detail
             )
 
     # ---- Slots ----

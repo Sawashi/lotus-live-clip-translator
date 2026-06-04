@@ -38,12 +38,16 @@ class ArgosEngine:
         try:
             installed = argostranslate.translate.get_installed_languages()
             self._installed_pairs = {}
-            for from_lang in installed:
-                for to_lang in from_lang:
-                    pair_key = f"{from_lang.code}_{to_lang.code}"
+            for lang in installed:
+                for trans in lang.translations_from:
+                    # trans is IdentityTranslation or CachedTranslation
+                    # Has .from_lang and .to_lang (Language objects with .code)
+                    from_code = trans.from_lang.code
+                    to_code = trans.to_lang.code
+                    pair_key = f"{from_code}_{to_code}"
                     self._installed_pairs[pair_key] = {
-                        "from": from_lang.code,
-                        "to": to_lang.code
+                        "from": from_code,
+                        "to": to_code
                     }
             self._ready = len(self._installed_pairs) > 0
             logger.info("Loaded %d installed Argos packages", len(self._installed_pairs))
@@ -68,8 +72,7 @@ class ArgosEngine:
                 None
             )
             if package:
-                download_path = package.download()
-                package.install(download_path)
+                package.install()
                 self._load_installed_packages()
                 logger.info("Installed Argos package: %s → %s", from_code, to_code)
                 return True
@@ -101,7 +104,8 @@ class ArgosEngine:
                 return ""
 
         try:
-            result = argostranslate.translate.translation(text, from_code, to_code)
+            translation = argostranslate.translate.get_translation_from_codes(from_code, to_code)
+            result = translation.translate(text)
             logger.debug("Argos translate: '%s' → '%s'", text[:50], result[:50])
             return result
         except Exception as e:
