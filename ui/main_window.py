@@ -315,7 +315,8 @@ class MainWindow(QMainWindow):
             self._settings_panel.set_translation_status(
                 self._translation_worker.status_detail
             )
-            if not self._translation_worker._engines_checked:
+            # Keep polling until status stabilizes (not_ready changes to offline)
+            if self._translation_worker.status == "not_ready":
                 QTimer.singleShot(2000, self._check_translation_status)
 
     @staticmethod

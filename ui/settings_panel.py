@@ -109,6 +109,11 @@ class SettingsPanel(QWidget):
         buf_row.addWidget(self._buffer_label)
         audio_layout.addLayout(buf_row)
 
+        buf_note = QLabel("Lower buffer if speaking fast, increase if slow.\nGood range: 1.5s – 2.0s")
+        buf_note.setStyleSheet("color: #888; font-size: 10px; font-style: italic;")
+        buf_note.setWordWrap(True)
+        audio_layout.addWidget(buf_note)
+
         layout.addWidget(audio_group)
 
         # --- Language Selection ---
@@ -122,7 +127,7 @@ class SettingsPanel(QWidget):
         lang_layout.addWidget(QLabel("Source:"), 0, 0)
         self._source_lang = WheelIgnoringComboBox()
         self._source_lang.setMinimumWidth(160)
-        self._populate_languages(self._source_lang, include_auto=True)
+        self._populate_languages(self._source_lang, include_auto=False)
         self._source_lang.currentIndexChanged.connect(self._on_source_lang_changed)
         lang_layout.addWidget(self._source_lang, 0, 1)
 
@@ -138,6 +143,38 @@ class SettingsPanel(QWidget):
         lang_layout.addWidget(self._lang_note, 2, 0, 1, 2)
 
         layout.addWidget(lang_group)
+
+        # --- Whisper Model (moved between Language and Translation) ---
+        model_group = QGroupBox("Whisper Model")
+        model_layout = QVBoxLayout(model_group)
+        model_layout.setContentsMargins(GROUP_MARGINS, GROUP_MARGINS, GROUP_MARGINS, GROUP_MARGINS)
+        model_layout.setSpacing(GROUP_SPACING)
+
+        self._model_selector = WheelIgnoringComboBox()
+        self._model_selector.setMinimumWidth(280)
+        for value, label in MODEL_OPTIONS:
+            self._model_selector.addItem(label, value)
+        self._model_selector.currentIndexChanged.connect(self._on_model_selection_changed)
+        model_layout.addWidget(self._model_selector)
+
+        download_row = QHBoxLayout()
+        download_row.setSpacing(8)
+        self._model_status_label = QLabel("")
+        download_row.addWidget(self._model_status_label, 1)
+        self._download_btn = QPushButton("Download")
+        self._download_btn.setMinimumHeight(32)
+        self._download_btn.clicked.connect(self._download_selected_model)
+        self._download_btn.setEnabled(False)
+        download_row.addWidget(self._download_btn)
+        model_layout.addLayout(download_row)
+
+        self._update_model_download_status()
+
+        model_layout.addWidget(QLabel(
+            "Note: Larger models are more accurate but slower and use more RAM."
+        ))
+
+        layout.addWidget(model_group)
 
         # --- Translation ---
         trans_group = QGroupBox("Translation")
@@ -232,38 +269,6 @@ class SettingsPanel(QWidget):
 
         layout.addWidget(overlay_group)
 
-        # --- Whisper Model ---
-        model_group = QGroupBox("Whisper Model")
-        model_layout = QVBoxLayout(model_group)
-        model_layout.setContentsMargins(GROUP_MARGINS, GROUP_MARGINS, GROUP_MARGINS, GROUP_MARGINS)
-        model_layout.setSpacing(GROUP_SPACING)
-
-        self._model_selector = WheelIgnoringComboBox()
-        self._model_selector.setMinimumWidth(280)
-        for value, label in MODEL_OPTIONS:
-            self._model_selector.addItem(label, value)
-        self._model_selector.currentIndexChanged.connect(self._on_model_selection_changed)
-        model_layout.addWidget(self._model_selector)
-
-        download_row = QHBoxLayout()
-        download_row.setSpacing(8)
-        self._model_status_label = QLabel("")
-        download_row.addWidget(self._model_status_label, 1)
-        self._download_btn = QPushButton("Download")
-        self._download_btn.setMinimumHeight(32)
-        self._download_btn.clicked.connect(self._download_selected_model)
-        self._download_btn.setEnabled(False)
-        download_row.addWidget(self._download_btn)
-        model_layout.addLayout(download_row)
-
-        self._update_model_download_status()
-
-        model_layout.addWidget(QLabel(
-            "Note: Larger models are more accurate but slower and use more RAM."
-        ))
-
-        layout.addWidget(model_group)
-
         # --- Theme ---
         theme_group = QGroupBox("Theme")
         theme_layout = QHBoxLayout(theme_group)
@@ -303,7 +308,8 @@ class SettingsPanel(QWidget):
         layout.addStretch()
         self.setLayout(layout)
 
-        # Populate target after UI built
+        # Set defaults: en → vi, then populate target
+        self._source_lang.setCurrentIndex(0)  # English is first
         self._rebuild_target_lang(self._source_lang.currentData())
 
     def _populate_languages(self, combo: QComboBox, include_auto: bool = False):
@@ -337,11 +343,21 @@ class SettingsPanel(QWidget):
             elif src_code != "en" and "en" in self._argos_pairs.get(src_code, []) and code in en_targets:
                 self._target_lang.addItem(f"{lang['name']} ⚠ slower", ("hop2", code))
             elif src_code == "en" and code not in en_targets:
-                # English can't translate to this even via hop
                 pass
             elif src_code != "en" and code not in direct_codes:
-                # No path at all — still show but disabled? skip for now
                 pass
+
+        # Select Vietnamese if available, else first item
+        vi_idx = None
+        for i in range(self._target_lang.count()):
+            item = self._target_lang.itemData(i)
+            if isinstance(item, tuple) and item[1] == "vi":
+                vi_idx = i
+                break
+        if vi_idx is not None:
+            self._target_lang.setCurrentIndex(vi_idx)
+        elif self._target_lang.count() > 0:
+            self._target_lang.setCurrentIndex(0)
 
         self._target_lang.blockSignals(False)
         self._emit_change()
@@ -375,8 +391,8 @@ class SettingsPanel(QWidget):
         self._font_slider.setValue(24)
         self._opacity_slider.setValue(70)
         self._spacing_slider.setValue(12)
-        self._source_lang.setCurrentText("Auto Detect")
-        self._target_lang.setCurrentText("English")
+        self._source_lang.setCurrentIndex(0)  # English
+        # target rebuilds via _on_source_lang_changed → _rebuild_target_lang which picks vi
         self._display_mode.setCurrentText("Bilingual")
         self._model_selector.setCurrentIndex(1)
         self._theme_selector.setCurrentText("Dark")
@@ -399,7 +415,7 @@ class SettingsPanel(QWidget):
         """Get (mode, code) tuple from target combo, e.g. ('direct', 'ja') or ('hop2', 'vi')."""
         data = self._target_lang.currentData()
         if data is None:
-            return ("direct", "en")
+            return ("direct", "vi")
         return data
 
     def get_settings(self) -> dict:
@@ -425,7 +441,7 @@ class SettingsPanel(QWidget):
         """Apply settings from a dict."""
         self.blockSignals(True)
 
-        src_code = settings.get("source_language", "auto")
+        src_code = settings.get("source_language", "en")
         for i in range(self._source_lang.count()):
             if self._source_lang.itemData(i) == src_code:
                 self._source_lang.setCurrentIndex(i)
@@ -434,7 +450,7 @@ class SettingsPanel(QWidget):
         # Rebuild target after source set
         self._rebuild_target_lang(self._source_lang.currentData())
 
-        tgt_code = settings.get("target_language", "en")
+        tgt_code = settings.get("target_language", "vi")
         for i in range(self._target_lang.count()):
             item = self._target_lang.itemData(i)
             if isinstance(item, tuple) and item[1] == tgt_code:
