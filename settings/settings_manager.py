@@ -1,4 +1,4 @@
-"""Settings manager for Live Translate Overlay.
+"""Settings manager for Lotus Translator.
 
 Handles loading, saving, and migrating application settings
 using a JSON config file stored in the user's AppData folder.
@@ -7,6 +7,7 @@ using a JSON config file stored in the user's AppData folder.
 import os
 import json
 import logging
+from datetime import datetime, date
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -26,14 +27,17 @@ DEFAULT_SETTINGS = {
     "overlay_x": 100,
     "overlay_y": 100,
     "overlay_width": 800,
-    "overlay_height": 200
+    "overlay_height": 200,
+    # Developer-only: set a date to block the app (format: YYYY-MM-DD)
+    # If not set or empty, app runs freely
+    "expiry_date": ""
 }
 
 
 class SettingsManager:
     """Manages application settings persistence."""
 
-    def __init__(self, app_name="LiveTranslateOverlay"):
+    def __init__(self, app_name="LotusTranslator"):
         """Initialize settings manager with AppData path."""
         self.app_name = app_name
         self.config_dir = self._get_config_dir()
@@ -54,6 +58,20 @@ class SettingsManager:
         """Create config directory if it doesn't exist."""
         self.config_dir.mkdir(parents=True, exist_ok=True)
 
+    def check_expiry(self) -> bool:
+        """Check if app is expired. Returns True if still valid."""
+        expiry_str = self._settings.get("expiry_date", "")
+        if not expiry_str:
+            return True  # No expiry set → free to use
+        try:
+            exp_date = datetime.strptime(expiry_str, "%Y-%m-%d").date()
+            if date.today() > exp_date:
+                logger.warning("App expired on %s", expiry_str)
+                return False
+        except ValueError:
+            logger.error("Invalid expiry_date format: %s", expiry_str)
+        return True
+
     def load(self):
         """Load settings from config file."""
         try:
@@ -65,6 +83,7 @@ class SettingsManager:
             else:
                 logger.info("No config file found, using defaults")
                 self._settings = DEFAULT_SETTINGS.copy()
+                self.save()
         except (json.JSONDecodeError, IOError) as e:
             logger.error("Failed to load config: %s", e)
             self._settings = DEFAULT_SETTINGS.copy()
