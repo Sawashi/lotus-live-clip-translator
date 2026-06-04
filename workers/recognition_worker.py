@@ -88,6 +88,9 @@ class RecognitionWorker(threading.Thread):
                     try:
                         data = self._audio_queue.get(timeout=0.1)
                         self._buffer = np.concatenate([self._buffer, data])
+                        # Log when we first start receiving audio
+                        if len(self._buffer) == len(data):
+                            logger.info("Audio data received, buffer growing (%.1f sec chunks)", CHUNK_DURATION)
                     except queue.Empty:
                         if not self._running:
                             return
@@ -105,6 +108,7 @@ class RecognitionWorker(threading.Thread):
 
                 for seg in segments:
                     if seg["text"]:
+                        print(f"[RECOGNIZED] {seg['text']}")
                         self._text_queue.put({
                             "type": "transcription",
                             "text": seg["text"],

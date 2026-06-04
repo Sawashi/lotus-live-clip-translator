@@ -48,6 +48,11 @@ class MainWindow(QMainWindow):
         self._overlay = None
         self._settings_panel = None
 
+        # Debounce timer for settings save (avoids writing JSON on every slider tick)
+        self._save_debounce = QTimer(self)
+        self._save_debounce.setSingleShot(True)
+        self._save_debounce.timeout.connect(self._save_settings)
+
         self._init_ui()
         self._init_overlay()
         self._init_timers()
@@ -116,7 +121,8 @@ class MainWindow(QMainWindow):
 
     def _load_settings(self):
         """Load and apply saved settings."""
-        settings = self._settings_manager.load()
+        self._settings_manager.load()
+        settings = self._settings_manager.get_all()
 
         # Apply to UI panel
         self._settings_panel.apply_settings(settings)
@@ -136,7 +142,7 @@ class MainWindow(QMainWindow):
         pos = self._overlay.save_position()
         settings.update(pos)
 
-        self._settings_manager.save(settings)
+        self._settings_manager.set_multiple(settings)
 
     def _on_settings_changed(self):
         """Handle settings panel changes."""
@@ -156,8 +162,8 @@ class MainWindow(QMainWindow):
         if self._capturing:
             self._update_worker_settings(settings)
 
-        # Auto-save
-        self._save_settings()
+        # Auto-save with debounce (300ms) — avoids writing JSON on every slider tick
+        self._save_debounce.start(300)
 
     def _update_worker_settings(self, settings: dict):
         """Push settings changes to running workers."""
@@ -248,7 +254,8 @@ class MainWindow(QMainWindow):
 
             # Update UI
             self._settings_panel.set_capturing(True)
-            self._settings_panel.set_device_status(self._capture_worker.device_name or "Default")
+            # Device name may not be available yet (thread hasn't run)
+            QTimer.singleShot(500, self._update_device_status)
 
             # Poll model status
             QTimer.singleShot(2000, self._check_model_status)
@@ -292,6 +299,13 @@ class MainWindow(QMainWindow):
         self._overlay.clear()
 
         logger.info("Capture stopped")
+
+    def _update_device_status(self):
+        """Update device status label after capture thread has started."""
+        if self._capture_worker and self._capture_worker.device_name:
+            self._settings_panel.set_device_status(self._capture_worker.device_name)
+        else:
+            self._settings_panel.set_device_status("Default Playback Device")
 
     def _check_model_status(self):
         """Update model loading status indicator."""
@@ -351,7 +365,7 @@ class MainWindow(QMainWindow):
 
     def _on_overlay_moved(self, x: int, y: int):
         """Save overlay position when moved."""
-        self._save_settings()
+        self._save_debounce.start(300)
 
     def _show_about(self):
         """Show about dialog."""

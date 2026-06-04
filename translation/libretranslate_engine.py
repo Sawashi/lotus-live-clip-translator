@@ -39,7 +39,7 @@ class LibreTranslateEngine:
         """Check if LibreTranslate is reachable."""
         try:
             resp = requests.get(
-                PUBLC_API_URL.replace("/translate", "/languages"),
+                PUBLIC_API_URL.replace("/translate", "/languages"),
                 timeout=3
             )
             self._available = resp.status_code == 200

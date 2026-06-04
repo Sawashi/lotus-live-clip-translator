@@ -5,9 +5,9 @@ subtitles over any application. Supports drag and click-through modes.
 """
 
 import logging
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel
-from PyQt6.QtCore import Qt, QPoint, QTimer, pyqtSignal
-from PyQt6.QtGui import QPainter, QColor, QFont, QFontMetrics, QPalette
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QSizeGrip
+from PyQt6.QtCore import Qt, QPoint, QTimer, pyqtSignal, QRect
+from PyQt6.QtGui import QPainter, QColor, QFont, QFontMetrics, QPalette, QPen
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ class SubtitleOverlay(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._drag_mode = False
+        self._drag_mode = True
         self._dragging = False
         self._drag_pos = QPoint()
         self._subtitle_lines = []
@@ -75,6 +75,10 @@ class SubtitleOverlay(QWidget):
 
         self.setLayout(layout)
 
+        # Resize grip
+        self._resize_grip = QSizeGrip(self)
+        self._resize_grip.setStyleSheet("background: transparent;")
+
         # Default size
         self.resize(800, 200)
 
@@ -92,6 +96,16 @@ class SubtitleOverlay(QWidget):
                 painter.setPen(QColor(100, 100, 100, 200))
                 painter.drawRect(1, 1, self.width() - 2, self.height() - 2)
                 painter.setPen(Qt.PenStyle.NoPen)
+
+                # Resize handle indicator (bottom-right corner)
+                grip_rect = QRect(
+                    self.width() - 20, self.height() - 20, 16, 16
+                )
+                painter.setPen(QPen(QColor(180, 180, 180, 200), 2))
+                for i in range(3):
+                    y = grip_rect.y() + 4 + i * 5
+                    x = grip_rect.x() + 4 + i * 5
+                    painter.drawLine(x, y, grip_rect.right() - 4, y)
 
             painter.drawRoundedRect(self.rect().adjusted(0, 0, 0, 0), 8, 8)
         super().paintEvent(event)
@@ -199,6 +213,7 @@ class SubtitleOverlay(QWidget):
             Qt.WidgetAttribute.WA_TransparentForMouseEvents,
             not enabled
         )
+        self._resize_grip.setVisible(enabled)
         if not enabled:
             self.setCursor(Qt.CursorShape.ArrowCursor)
         self.update()
@@ -236,6 +251,10 @@ class SubtitleOverlay(QWidget):
     def resizeEvent(self, event):
         """Handle resize."""
         super().resizeEvent(event)
+        # Position size grip at bottom-right
+        self._resize_grip.setGeometry(
+            self.width() - 20, self.height() - 20, 20, 20
+        )
         self.position_changed.emit(self.x(), self.y())
 
     # ---- Persistence ----

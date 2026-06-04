@@ -31,7 +31,7 @@ def load_languages() -> dict:
             return json.load(f)
     except Exception as e:
         logger.error("Failed to load languages: %s", e)
-        return {"languages": [], "translation_pairs": []}
+        return {"whisper_languages": [], "translation_pairs": []}
 
 
 class SettingsPanel(QWidget):
@@ -216,7 +216,7 @@ class SettingsPanel(QWidget):
         """Fill a combo box with language options."""
         if include_auto:
             combo.addItem("Auto Detect", "auto")
-        for lang in self._lang_data.get("languages", []):
+        for lang in self._lang_data.get("whisper_languages", []):
             combo.addItem(lang["name"], lang["code"])
 
     def _on_start_stop(self):

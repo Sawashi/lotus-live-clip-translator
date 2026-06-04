@@ -1,6 +1,7 @@
-PyQt6==6.6.0
+PyQt6==6.7.0
 soundcard==0.4.1
 faster-whisper==1.0.2
+onnxruntime==1.18.1
 argostranslate==1.11.0
 requests==2.31.0
 PyInstaller==6.5.0

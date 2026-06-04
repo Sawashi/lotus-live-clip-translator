@@ -56,6 +56,7 @@ class TranslationWorker(threading.Thread):
                     continue
 
                 translated = self._translate(msg["text"])
+                print(f"[TRANSLATED] {translated}" if translated else "[TRANSLATED] (no translation)")
                 self._subtitle_queue.put({
                     "original": msg["text"],
                     "translated": translated,
@@ -93,8 +94,9 @@ class TranslationWorker(threading.Thread):
         """Translate text using current mode with fallback."""
         if self._source_language == "auto":
             # Can't translate from auto-detect without knowing the language
-            # Pass through as-is
-            return ""
+            # Pass through original text as-is
+            logger.debug("Source=auto, passing through: '%s'", text[:50])
+            return text
 
         try:
             if self._mode == TRANSLATION_MODE_ONLINE:
