@@ -2,10 +2,11 @@
 
 Processes audio chunks from the audio queue using faster-whisper.
 Feeds transcribed text into a queue for the translation worker.
-Includes deduplication to prevent repeating the same text.
+Detects silence/gaps to reset state cleanly between clips.
 """
 
 import queue
+import sys
 import time
 import logging
 import threading
@@ -14,9 +15,13 @@ from speech.whisper_engine import WhisperEngine
 
 logger = logging.getLogger(__name__)
 
-CHUNK_DURATION = 2.0  # Seconds of audio to process at a time
 SAMPLE_RATE = 16000
 DEDUP_THRESHOLD = 0.7  # Similarity ratio to consider text a duplicate
+SILENCE_THRESHOLD = 0.005  # RMS energy below this = silence
+SILENCE_RESET_SECONDS = 1.0  # Continuous silence triggers state reset
+
+# main.py redirects stdout to suppress argostranslate spam; grab real stdout for user-facing output
+_original_stdout = sys.__stdout__
 
 
 class RecognitionWorker(threading.Thread):
@@ -26,7 +31,8 @@ class RecognitionWorker(threading.Thread):
         self,
         audio_queue: queue.Queue,
         text_queue: queue.Queue,
-        model_size: str = "small"
+        model_size: str = "small",
+        chunk_duration: float = 2.0
     ):
         super().__init__(daemon=True)
         self._audio_queue = audio_queue
@@ -36,10 +42,14 @@ class RecognitionWorker(threading.Thread):
         self._language = "auto"
         self._buffer = np.array([], dtype=np.float32)
         self._model_loaded = threading.Event()
+        self._chunk_duration = chunk_duration
         # Dedup state
         self._last_text = ""
         self._last_text_count = 0
-        self._max_repeat = 2  # Allow same text up to 2 times, then suppress
+        self._max_repeat = 1  # Allow same text once, then suppress
+        # Silence detection for graceful reset between clips
+        self._silence_start = None  # time.time() when silence began
+        self._reset_sent = False  # prevent sending multiple resets
 
     def run(self):
         """Run the recognition loop."""
@@ -131,9 +141,36 @@ class RecognitionWorker(threading.Thread):
         self._last_text_count = 1
         return False
 
+    def set_buffer_duration(self, seconds: float):
+        """Set chunk duration for audio processing."""
+        self._chunk_duration = max(0.5, min(10.0, seconds))
+
+    def _is_silent(self, audio_chunk: np.ndarray) -> bool:
+        """Check if audio chunk is silence (low RMS energy)."""
+        rms = np.sqrt(np.mean(audio_chunk ** 2))
+        return rms < SILENCE_THRESHOLD
+
+    def _handle_silence(self, audio_chunk: np.ndarray):
+        """Track silence duration and reset state if silence persists."""
+        if self._is_silent(audio_chunk):
+            if self._silence_start is None:
+                self._silence_start = time.time()
+            elif not self._reset_sent and (time.time() - self._silence_start) >= SILENCE_RESET_SECONDS:
+                logger.debug("Silence detected for %.1f sec → resetting state", SILENCE_RESET_SECONDS)
+                # Clear internal state
+                self._buffer = np.array([], dtype=np.float32)
+                self._last_text = ""
+                self._last_text_count = 0
+                # Signal downstream workers to reset
+                self._text_queue.put({"type": "reset"})
+                self._reset_sent = True
+        else:
+            self._silence_start = None
+            self._reset_sent = False
+
     def _process_loop(self):
         """Process audio chunks from the queue."""
-        chunk_samples = int(CHUNK_DURATION * SAMPLE_RATE)
+        chunk_samples = int(self._chunk_duration * SAMPLE_RATE)
 
         while self._running:
             try:
@@ -144,7 +181,7 @@ class RecognitionWorker(threading.Thread):
                         self._buffer = np.concatenate([self._buffer, data])
                         # Log when we first start receiving audio
                         if len(self._buffer) == len(data):
-                            logger.info("Audio data received, buffer growing (%.1f sec chunks)", CHUNK_DURATION)
+                            logger.info("Audio data received, buffer growing (%.1f sec chunks)", self._chunk_duration)
                     except queue.Empty:
                         if not self._running:
                             return
@@ -158,6 +195,9 @@ class RecognitionWorker(threading.Thread):
                     time.sleep(0.1)
                     continue
 
+                # Silence detection: check before transcribing
+                self._handle_silence(audio_chunk)
+
                 segments = self._engine.transcribe(audio_chunk, self._language)
 
                 for seg in segments:
@@ -167,7 +207,8 @@ class RecognitionWorker(threading.Thread):
                         if self._is_duplicate(text):
                             continue
                         try:
-                            print(f"[RECOGNIZED] {text}")
+                            _original_stdout.write(f"[RECOGNIZED] {text}\n")
+                            _original_stdout.flush()
                         except UnicodeEncodeError:
                             pass  # Windows console can't print some chars
                         self._text_queue.put({

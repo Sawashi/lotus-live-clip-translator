@@ -175,6 +175,7 @@ class MainWindow(QMainWindow):
         if self._recognition_worker:
             self._recognition_worker.set_language(settings["source_language"])
             self._recognition_worker.set_model(settings["whisper_model"])
+            self._recognition_worker.set_buffer_duration(settings.get("buffer_duration", 2.0))
 
         if self._translation_worker:
             self._translation_worker.set_enabled(settings["translation_enabled"])
@@ -240,9 +241,11 @@ class MainWindow(QMainWindow):
         try:
             # Create and start workers (thread-safe queues)
             self._capture_worker = CaptureWorker(self._audio_queue)
+            chunk_duration = settings.get("buffer_duration", 2.0)
             self._recognition_worker = RecognitionWorker(
                 self._audio_queue, self._text_queue,
-                model_size=settings["whisper_model"]
+                model_size=settings["whisper_model"],
+                chunk_duration=chunk_duration
             )
             self._translation_worker = TranslationWorker(
                 self._text_queue, self._subtitle_queue
@@ -369,7 +372,11 @@ class MainWindow(QMainWindow):
             pass
 
         if last_msg is not None:
-            self._overlay.set_subtitles(last_msg["original"], last_msg["translated"])
+            # Handle reset signal: clear overlay display
+            if last_msg.get("type") == "reset":
+                self._overlay.clear()
+            else:
+                self._overlay.set_subtitles(last_msg["original"], last_msg["translated"])
 
         # Update translation status if worker is running
         if self._translation_worker:

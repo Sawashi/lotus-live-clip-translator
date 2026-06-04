@@ -59,6 +59,17 @@ class TranslationWorker(threading.Thread):
         while self._running:
             try:
                 msg = self._text_queue.get(timeout=0.5)
+
+                # Handle reset signal from recognition worker (silence gap)
+                if msg.get("type") == "reset":
+                    logger.debug("Translation worker: received reset signal, clearing state")
+                    self._last_original = ""
+                    self._last_translated = ""
+                    self._last_timestamp = 0.0
+                    # Forward reset to overlay
+                    self._subtitle_queue.put({"type": "reset"})
+                    continue
+
                 if not self._enabled:
                     self._subtitle_queue.put({
                         "original": msg["text"],

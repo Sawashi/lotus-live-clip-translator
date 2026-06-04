@@ -90,6 +90,24 @@ class SettingsPanel(QWidget):
         self._model_status.setMinimumHeight(28)
         audio_layout.addWidget(self._model_status)
 
+        # Buffer duration
+        buf_row = QHBoxLayout()
+        buf_row.setSpacing(6)
+        buf_row.addWidget(QLabel("Buffer:"))
+        self._buffer_slider = WheelIgnoringSlider(Qt.Orientation.Horizontal)
+        self._buffer_slider.setRange(5, 50)  # 0.5s to 5.0s (x10)
+        self._buffer_slider.setValue(20)     # default 2.0s
+        self._buffer_slider.valueChanged.connect(self._emit_change)
+        buf_row.addWidget(self._buffer_slider, 1)
+        self._buffer_label = QLabel("2.0s")
+        self._buffer_label.setFixedWidth(36)
+        self._buffer_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._buffer_slider.valueChanged.connect(
+            lambda v: self._buffer_label.setText(f"{v / 10:.1f}s")
+        )
+        buf_row.addWidget(self._buffer_label)
+        audio_layout.addLayout(buf_row)
+
         layout.addWidget(audio_group)
 
         # --- Language Selection ---
@@ -364,6 +382,7 @@ class SettingsPanel(QWidget):
             "overlay_opacity": self._opacity_slider.value() / 100.0,
             "line_spacing": self._spacing_slider.value() / 10.0,
             "theme": self._theme_selector.currentData(),
+            "buffer_duration": self._buffer_slider.value() / 10.0,
         }
 
     def apply_settings(self, settings: dict):
@@ -409,6 +428,9 @@ class SettingsPanel(QWidget):
         self._selected_color = settings.get("font_color", "#FFFFFF")
         self._opacity_slider.setValue(int(settings.get("overlay_opacity", 0.7) * 100))
         self._spacing_slider.setValue(int(settings.get("line_spacing", 1.2) * 10))
+        buf = settings.get("buffer_duration", 2.0)
+        self._buffer_slider.setValue(int(buf * 10))
+        self._buffer_label.setText(f"{buf:.1f}s")
 
         theme = settings.get("theme", "dark")
         for i in range(self._theme_selector.count()):
