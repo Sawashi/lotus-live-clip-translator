@@ -30,6 +30,7 @@ class TranslationWorker(threading.Thread):
         self._enabled = True
         self._source_language = "auto"
         self._target_language = "en"
+        self._target_mode = "direct"
         self._status = "not_ready"
         self._status_detail = ""
         self._engines_checked = False
@@ -95,10 +96,11 @@ class TranslationWorker(threading.Thread):
         self._mode = mode
         self._update_status()
 
-    def set_languages(self, source: str, target: str):
-        """Set source and target languages."""
+    def set_languages(self, source: str, target: str, mode: str = "direct"):
+        """Set source and target languages with translation mode."""
         self._source_language = source
         self._target_language = target
+        self._target_mode = mode
 
     @property
     def status(self) -> str:
@@ -138,9 +140,14 @@ class TranslationWorker(threading.Thread):
             return text
 
         try:
-            result = self._argos.translate(
-                text, self._source_language, self._target_language
-            )
+            if self._target_mode == "hop2":
+                result = self._argos.translate_via_english(
+                    text, self._source_language, self._target_language
+                )
+            else:
+                result = self._argos.translate(
+                    text, self._source_language, self._target_language
+                )
             if result:
                 self._status = "offline"
                 return result

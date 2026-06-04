@@ -169,7 +169,8 @@ class MainWindow(QMainWindow):
             self._translation_worker.set_enabled(settings["translation_enabled"])
             self._translation_worker.set_languages(
                 settings["source_language"],
-                settings["target_language"]
+                settings["target_language"],
+                settings.get("target_mode", "direct")
             )
 
     def _apply_theme(self, theme: str):
@@ -241,7 +242,8 @@ class MainWindow(QMainWindow):
             self._translation_worker.set_enabled(settings["translation_enabled"])
             self._translation_worker.set_languages(
                 settings["source_language"],
-                settings["target_language"]
+                settings["target_language"],
+                settings.get("target_mode", "direct")
             )
 
             self._capture_worker.start()

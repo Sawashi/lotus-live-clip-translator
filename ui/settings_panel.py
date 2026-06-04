@@ -132,7 +132,7 @@ class SettingsPanel(QWidget):
         lang_layout.addWidget(self._target_lang, 1, 1)
 
         # Constraint note
-        self._lang_note = QLabel("Some language combinations are not available and will be disabled.")
+        self._lang_note = QLabel("⚠ slower options use 2-hop via English (source→en→target).")
         self._lang_note.setStyleSheet("color: #FF9800; font-size: 10px; font-style: italic;")
         self._lang_note.setWordWrap(True)
         lang_layout.addWidget(self._lang_note, 2, 0, 1, 2)
@@ -311,16 +311,38 @@ class SettingsPanel(QWidget):
         if include_auto:
             combo.addItem("Auto Detect", "auto")
         for lang in self._lang_data.get("whisper_languages", []):
+            if lang["code"] == "auto":
+                continue
             combo.addItem(lang["name"], lang["code"])
 
     def _rebuild_target_lang(self, src_code: str):
-        """Rebuild target lang combo based on source using argos_pairs."""
-        allowed = self._argos_pairs.get(src_code, ["en"])
+        """Rebuild target lang combo based on source.
+
+        Shows all languages with mode indicators:
+          - no marker = direct translation (fast, 1 hop)
+          - ⚠ slower = via English (2 hops: src → en → target)
+        """
         self._target_lang.blockSignals(True)
         self._target_lang.clear()
+
+        direct_codes = set(self._argos_pairs.get(src_code, []))
+        en_targets = set(self._argos_pairs.get("en", []))
+
         for lang in self._lang_data.get("whisper_languages", []):
-            if lang["code"] in allowed:
-                self._target_lang.addItem(lang["name"], lang["code"])
+            code = lang["code"]
+            if code == src_code:
+                continue  # skip source
+            if code in direct_codes:
+                self._target_lang.addItem(lang["name"], ("direct", code))
+            elif src_code != "en" and "en" in self._argos_pairs.get(src_code, []) and code in en_targets:
+                self._target_lang.addItem(f"{lang['name']} ⚠ slower", ("hop2", code))
+            elif src_code == "en" and code not in en_targets:
+                # English can't translate to this even via hop
+                pass
+            elif src_code != "en" and code not in direct_codes:
+                # No path at all — still show but disabled? skip for now
+                pass
+
         self._target_lang.blockSignals(False)
         self._emit_change()
 
@@ -373,11 +395,20 @@ class SettingsPanel(QWidget):
 
     # ---- Getters for settings values ----
 
+    def get_target_data(self) -> tuple:
+        """Get (mode, code) tuple from target combo, e.g. ('direct', 'ja') or ('hop2', 'vi')."""
+        data = self._target_lang.currentData()
+        if data is None:
+            return ("direct", "en")
+        return data
+
     def get_settings(self) -> dict:
         """Return current settings as a dict."""
+        mode, tgt_code = self.get_target_data()
         return {
             "source_language": self._source_lang.currentData(),
-            "target_language": self._target_lang.currentData(),
+            "target_language": tgt_code,
+            "target_mode": mode,
             "translation_enabled": self._translation_toggle.isChecked(),
             "translation_mode": "offline",
             "display_mode": self._display_mode.currentData(),
@@ -405,7 +436,11 @@ class SettingsPanel(QWidget):
 
         tgt_code = settings.get("target_language", "en")
         for i in range(self._target_lang.count()):
-            if self._target_lang.itemData(i) == tgt_code:
+            item = self._target_lang.itemData(i)
+            if isinstance(item, tuple) and item[1] == tgt_code:
+                self._target_lang.setCurrentIndex(i)
+                break
+            elif item == tgt_code:
                 self._target_lang.setCurrentIndex(i)
                 break
 

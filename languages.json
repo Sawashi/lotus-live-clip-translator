@@ -1,6 +1,5 @@
 {
   "whisper_languages": [
-    {"code": "auto", "name": "Auto Detect"},
     {"code": "en", "name": "English"},
     {"code": "ja", "name": "Japanese"},
     {"code": "zh", "name": "Chinese"},
