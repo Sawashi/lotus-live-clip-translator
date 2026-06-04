@@ -1,0 +1,375 @@
+"""Main application window.
+
+Orchestrates all components: audio capture, speech recognition,
+translation, and subtitle overlay display.
+"""
+
+import os
+import sys
+import json
+import queue
+import logging
+from PyQt6.QtWidgets import (
+    QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
+    QSplitter, QMessageBox
+)
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QAction
+
+from overlay.subtitle_overlay import SubtitleOverlay
+from ui.settings_panel import SettingsPanel
+from settings.settings_manager import SettingsManager
+from workers.capture_worker import CaptureWorker
+from workers.recognition_worker import RecognitionWorker
+from workers.translation_worker import TranslationWorker
+
+logger = logging.getLogger(__name__)
+
+
+class MainWindow(QMainWindow):
+    """Main application window."""
+
+    def __init__(self):
+        super().__init__()
+        self._settings_manager = SettingsManager()
+        self._capturing = False
+
+        # Thread-safe queues for the pipeline
+        self._audio_queue = queue.Queue(maxsize=100)
+        self._text_queue = queue.Queue(maxsize=50)
+        self._subtitle_queue = queue.Queue(maxsize=50)
+
+        # Workers (created on start)
+        self._capture_worker = None
+        self._recognition_worker = None
+        self._translation_worker = None
+
+        # UI
+        self._overlay = None
+        self._settings_panel = None
+
+        self._init_ui()
+        self._init_overlay()
+        self._init_timers()
+
+        # Load saved settings
+        self._load_settings()
+
+    def _init_ui(self):
+        """Initialize the main window UI."""
+        self.setWindowTitle("Live Translate Overlay")
+        self.setMinimumSize(400, 600)
+        self.resize(420, 700)
+
+        # Central widget with horizontal splitter
+        central = QWidget()
+        self.setCentralWidget(central)
+
+        layout = QHBoxLayout(central)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        # Settings panel
+        self._settings_panel = SettingsPanel()
+        self._settings_panel.settings_changed.connect(self._on_settings_changed)
+        self._settings_panel.capture_toggled.connect(self._on_capture_toggled)
+
+        layout.addWidget(self._settings_panel)
+
+        # Apply light/dark theme
+        self._apply_theme("dark")
+
+        # Menu bar
+        self._setup_menu()
+
+    def _setup_menu(self):
+        """Create menu bar."""
+        menubar = self.menuBar()
+
+        overlay_menu = menubar.addMenu("Overlay")
+        toggle_action = QAction("Toggle Drag Mode", self)
+        toggle_action.triggered.connect(self._toggle_overlay_mode)
+        overlay_menu.addAction(toggle_action)
+
+        clear_action = QAction("Clear Subtitles", self)
+        clear_action.triggered.connect(self._clear_subtitles)
+        overlay_menu.addAction(clear_action)
+
+        help_menu = menubar.addMenu("Help")
+        about_action = QAction("About", self)
+        about_action.triggered.connect(self._show_about)
+        help_menu.addAction(about_action)
+
+    def _init_overlay(self):
+        """Create the subtitle overlay window."""
+        self._overlay = SubtitleOverlay()
+        self._overlay.position_changed.connect(self._on_overlay_moved)
+        self._overlay.show()
+
+    def _init_timers(self):
+        """Set up polling timers."""
+        # Poll subtitle queue from the main thread
+        self._subtitle_timer = QTimer(self)
+        self._subtitle_timer.timeout.connect(self._process_subtitle_queue)
+        self._subtitle_timer.start(100)  # 100ms polling
+
+    # ---- Settings ----
+
+    def _load_settings(self):
+        """Load and apply saved settings."""
+        settings = self._settings_manager.load()
+
+        # Apply to UI panel
+        self._settings_panel.apply_settings(settings)
+
+        # Apply to overlay
+        self._overlay.apply_settings(settings)
+
+        # Apply theme
+        theme = settings.get("theme", "dark")
+        self._apply_theme(theme)
+
+    def _save_settings(self):
+        """Save current settings."""
+        settings = self._settings_panel.get_settings()
+
+        # Include overlay position/size
+        pos = self._overlay.save_position()
+        settings.update(pos)
+
+        self._settings_manager.save(settings)
+
+    def _on_settings_changed(self):
+        """Handle settings panel changes."""
+        settings = self._settings_panel.get_settings()
+
+        # Update overlay immediately
+        self._overlay.set_font_size(settings["font_size"])
+        self._overlay.set_font_color(settings["font_color"])
+        self._overlay.set_bg_opacity(settings["overlay_opacity"])
+        self._overlay.set_line_spacing(settings["line_spacing"])
+        self._overlay.set_display_mode(settings["display_mode"])
+
+        # Update theme
+        self._apply_theme(settings["theme"])
+
+        # Update workers if running
+        if self._capturing:
+            self._update_worker_settings(settings)
+
+        # Auto-save
+        self._save_settings()
+
+    def _update_worker_settings(self, settings: dict):
+        """Push settings changes to running workers."""
+        if self._recognition_worker:
+            self._recognition_worker.set_language(settings["source_language"])
+            self._recognition_worker.set_model(settings["whisper_model"])
+
+        if self._translation_worker:
+            self._translation_worker.set_enabled(settings["translation_enabled"])
+            self._translation_worker.set_mode(settings["translation_mode"])
+            self._translation_worker.set_languages(
+                settings["source_language"],
+                settings["target_language"]
+            )
+
+    def _apply_theme(self, theme: str):
+        """Apply light or dark theme stylesheet."""
+        if theme == "light":
+            self.setStyleSheet("""
+                QMainWindow { background-color: #f5f5f5; }
+                QGroupBox { font-weight: bold; border: 1px solid #ccc;
+                            border-radius: 4px; margin-top: 10px; padding-top: 10px; }
+                QGroupBox::title { subcontrol-origin: margin;
+                                   left: 10px; padding: 0 3px; }
+                QLabel { color: #333; }
+                QPushButton { background-color: #e0e0e0; border: 1px solid #bbb;
+                              border-radius: 4px; padding: 6px 12px; }
+                QPushButton:hover { background-color: #d0d0d0; }
+                QComboBox { background-color: white; border: 1px solid #bbb;
+                            border-radius: 3px; padding: 3px; }
+                QSlider::groove:horizontal { height: 6px; background: #ddd; }
+                QSlider::handle:horizontal { width: 14px; margin: -4px 0; }
+            """)
+        else:  # dark
+            self.setStyleSheet("""
+                QMainWindow { background-color: #1e1e1e; }
+                QGroupBox { font-weight: bold; border: 1px solid #555;
+                            border-radius: 4px; margin-top: 10px; padding-top: 10px;
+                            color: #ddd; }
+                QGroupBox::title { subcontrol-origin: margin;
+                                   left: 10px; padding: 0 3px; }
+                QLabel { color: #ccc; }
+                QPushButton { background-color: #333; border: 1px solid #555;
+                              border-radius: 4px; padding: 6px 12px; color: #ddd; }
+                QPushButton:hover { background-color: #444; }
+                QComboBox { background-color: #2d2d2d; border: 1px solid #555;
+                            border-radius: 3px; padding: 3px; color: #ddd; }
+                QComboBox QAbstractItemView { background-color: #2d2d2d;
+                                              color: #ddd; selection-background-color: #444; }
+                QCheckBox { color: #ccc; }
+                QSlider::groove:horizontal { height: 6px; background: #444; }
+                QSlider::handle:horizontal { width: 14px; margin: -4px 0;
+                                             background: #888; border-radius: 7px; }
+            """)
+
+    # ---- Capture Control ----
+
+    def _start_capture(self):
+        """Start the audio capture pipeline."""
+        settings = self._settings_panel.get_settings()
+
+        try:
+            # Create and start workers (thread-safe queues)
+            self._capture_worker = CaptureWorker(self._audio_queue)
+            self._recognition_worker = RecognitionWorker(
+                self._audio_queue, self._text_queue,
+                model_size=settings["whisper_model"]
+            )
+            self._translation_worker = TranslationWorker(
+                self._text_queue, self._subtitle_queue
+            )
+
+            # Configure workers
+            self._recognition_worker.set_language(settings["source_language"])
+            self._translation_worker.set_enabled(settings["translation_enabled"])
+            self._translation_worker.set_mode(settings["translation_mode"])
+            self._translation_worker.set_languages(
+                settings["source_language"],
+                settings["target_language"]
+            )
+
+            # Start workers
+            self._capture_worker.start()
+            self._recognition_worker.start()
+            self._translation_worker.start()
+
+            self._capturing = True
+
+            # Update UI
+            self._settings_panel.set_capturing(True)
+            self._settings_panel.set_device_status(self._capture_worker.device_name or "Default")
+
+            # Poll model status
+            QTimer.singleShot(2000, self._check_model_status)
+
+            logger.info("Capture started")
+
+        except Exception as e:
+            logger.error("Failed to start capture: %s", e)
+            QMessageBox.critical(
+                self, "Error",
+                f"Failed to start audio capture:\n{e}\n\n"
+                "Make sure an audio device is connected and playing audio."
+            )
+
+    def _stop_capture(self):
+        """Stop the audio capture pipeline."""
+        self._capturing = False
+
+        # Stop workers
+        if self._capture_worker:
+            self._capture_worker.stop()
+        if self._recognition_worker:
+            self._recognition_worker.stop()
+        if self._translation_worker:
+            self._translation_worker.stop()
+
+        self._capture_worker = None
+        self._recognition_worker = None
+        self._translation_worker = None
+
+        # Clear queues
+        self._clear_queue(self._audio_queue)
+        self._clear_queue(self._text_queue)
+        self._clear_queue(self._subtitle_queue)
+
+        # Update UI
+        self._settings_panel.set_capturing(False)
+        self._settings_panel.set_device_status("Stopped")
+
+        # Clear overlay
+        self._overlay.clear()
+
+        logger.info("Capture stopped")
+
+    def _check_model_status(self):
+        """Update model loading status indicator."""
+        if self._recognition_worker and self._recognition_worker.is_model_loaded:
+            device = self._recognition_worker.device
+            model = self._recognition_worker.model_size
+            self._settings_panel.set_model_status(f"{model} ({device})")
+        else:
+            self._settings_panel.set_model_status("Loading...")
+            if self._capturing:
+                QTimer.singleShot(2000, self._check_model_status)
+
+    @staticmethod
+    def _clear_queue(q: queue.Queue):
+        """Clear all items from a queue."""
+        try:
+            while True:
+                q.get_nowait()
+        except queue.Empty:
+            pass
+
+    # ---- Subtitle Processing ----
+
+    def _process_subtitle_queue(self):
+        """Process incoming subtitle data from the translation worker."""
+        try:
+            while True:
+                msg = self._subtitle_queue.get_nowait()
+                self._overlay.set_subtitles(msg["original"], msg["translated"])
+        except queue.Empty:
+            pass
+
+        # Update translation status if worker is running
+        if self._translation_worker:
+            self._settings_panel.set_translation_status(
+                self._translation_worker.status.capitalize()
+            )
+
+    # ---- Slots ----
+
+    def _toggle_overlay_mode(self):
+        """Toggle drag mode on overlay."""
+        if self._overlay:
+            self._overlay.toggle_mode()
+
+    def _clear_subtitles(self):
+        """Clear overlay subtitles."""
+        if self._overlay:
+            self._overlay.clear()
+
+    def _on_capture_toggled(self, capturing: bool):
+        """Handle start/stop capture button."""
+        if capturing:
+            self._start_capture()
+        else:
+            self._stop_capture()
+
+    def _on_overlay_moved(self, x: int, y: int):
+        """Save overlay position when moved."""
+        self._save_settings()
+
+    def _show_about(self):
+        """Show about dialog."""
+        QMessageBox.about(
+            self, "About Live Translate Overlay",
+            "Live Translate Overlay v1.0.0\n\n"
+            "Real-time speech recognition and translation overlay.\n\n"
+            "Captures system audio via WASAPI Loopback.\n"
+            "Powered by faster-whisper, Argos Translate, and LibreTranslate.\n\n"
+            "Free and open source. No API keys required."
+        )
+
+    # ---- Event Overrides ----
+
+    def closeEvent(self, event):
+        """Handle window close."""
+        self._save_settings()
+        self._stop_capture()
+        if self._overlay:
+            self._overlay.close()
+        event.accept()

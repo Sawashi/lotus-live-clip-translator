@@ -1,0 +1,20 @@
+{
+  "version": "1.0.0",
+  "settings": {
+    "theme": "dark",
+    "source_language": "auto",
+    "target_language": "en",
+    "translation_enabled": true,
+    "translation_mode": "offline",
+    "display_mode": "bilingual",
+    "whisper_model": "small",
+    "font_size": 24,
+    "font_color": "#FFFFFF",
+    "overlay_opacity": 0.7,
+    "line_spacing": 1.2,
+    "overlay_x": 100,
+    "overlay_y": 100,
+    "overlay_width": 800,
+    "overlay_height": 200
+  }
+}

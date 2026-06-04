@@ -1,0 +1,28 @@
+{
+  "whisper_languages": [
+    {"code": "auto", "name": "Auto Detect"},
+    {"code": "en", "name": "English"},
+    {"code": "ja", "name": "Japanese"},
+    {"code": "zh", "name": "Chinese"},
+    {"code": "ko", "name": "Korean"},
+    {"code": "vi", "name": "Vietnamese"},
+    {"code": "es", "name": "Spanish"},
+    {"code": "fr", "name": "French"},
+    {"code": "de", "name": "German"}
+  ],
+  "translation_pairs": [
+    {"source": "ja", "target": "en", "name": "Japanese → English"},
+    {"source": "zh", "target": "en", "name": "Chinese → English"},
+    {"source": "ko", "target": "en", "name": "Korean → English"},
+    {"source": "en", "target": "vi", "name": "English → Vietnamese"},
+    {"source": "en", "target": "ja", "name": "English → Japanese"},
+    {"source": "es", "target": "en", "name": "Spanish → English"},
+    {"source": "fr", "target": "en", "name": "French → English"},
+    {"source": "de", "target": "en", "name": "German → English"}
+  ],
+  "whisper_models": [
+    {"id": "tiny", "name": "Tiny", "description": "Fastest, lowest accuracy"},
+    {"id": "small", "name": "Small", "description": "Balanced speed and accuracy (recommended)"},
+    {"id": "medium", "name": "Medium", "description": "Best accuracy, slower"}
+  ]
+}
