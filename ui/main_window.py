@@ -163,7 +163,7 @@ class MainWindow(QMainWindow):
         if self._recognition_worker:
             self._recognition_worker.set_language(settings["source_language"])
             self._recognition_worker.set_model(settings["whisper_model"])
-            self._recognition_worker.set_buffer_duration(settings.get("buffer_duration", 2.0))
+            self._recognition_worker.set_buffer_duration(settings.get("buffer_duration", 1.9))
 
         if self._translation_worker:
             self._translation_worker.set_enabled(settings["translation_enabled"])
@@ -228,7 +228,7 @@ class MainWindow(QMainWindow):
 
         try:
             self._capture_worker = CaptureWorker(self._audio_queue)
-            chunk_duration = settings.get("buffer_duration", 2.0)
+            chunk_duration = settings.get("buffer_duration", 1.9)
             self._recognition_worker = RecognitionWorker(
                 self._audio_queue, self._text_queue,
                 model_size=settings["whisper_model"],

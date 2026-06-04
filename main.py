@@ -104,7 +104,12 @@ def main():
     logger = setup_logging()
     logger.info("=== Lotus Translator starting ===")
 
-    # Check expiry before launching
+    # Create QApp early so QMessageBox works
+    app = QApplication(sys.argv)
+    app.setApplicationName("Lotus Translator")
+    app.setOrganizationName("LotusTranslator")
+
+    # Check expiry before launching main UI
     settings_mgr = SettingsManager()
     if not settings_mgr.check_expiry():
         expiry = settings_mgr.get("expiry_date", "unknown")
@@ -114,10 +119,6 @@ def main():
             "Please contact the developer for a new version."
         )
         sys.exit(1)
-
-    app = QApplication(sys.argv)
-    app.setApplicationName("Lotus Translator")
-    app.setOrganizationName("LotusTranslator")
 
     # Enable high DPI scaling
     app.setHighDpiScaleFactorRoundingPolicy(

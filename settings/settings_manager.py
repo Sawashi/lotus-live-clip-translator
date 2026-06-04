@@ -28,6 +28,7 @@ DEFAULT_SETTINGS = {
     "overlay_y": 100,
     "overlay_width": 800,
     "overlay_height": 200,
+    "buffer_duration": 1.9,
     # Developer-only: set a date to block the app (format: YYYY-MM-DD)
     # If not set or empty, app runs freely
     "expiry_date": ""
@@ -61,11 +62,22 @@ class SettingsManager:
     def check_expiry(self) -> bool:
         """Check if app is expired. Returns True if still valid."""
         expiry_str = self._settings.get("expiry_date", "")
+        # Debug: force print to original stdout so user can see
+        try:
+            import sys
+            sys.stdout.write(f"[DEBUG] check_expiry: expiry_str={expiry_str!r}\n")
+            sys.stdout.flush()
+        except Exception:
+            pass
         if not expiry_str:
             return True  # No expiry set → free to use
         try:
             exp_date = datetime.strptime(expiry_str, "%Y-%m-%d").date()
-            if date.today() > exp_date:
+            today = date.today()
+            if today >= exp_date:
+                import sys
+                sys.stdout.write(f"[DEBUG] EXPIRED! today={today} >= exp_date={exp_date}\n")
+                sys.stdout.flush()
                 logger.warning("App expired on %s", expiry_str)
                 return False
         except ValueError:
@@ -78,7 +90,13 @@ class SettingsManager:
             if self.config_file.exists():
                 with open(self.config_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                self._settings = data.get("settings", DEFAULT_SETTINGS.copy())
+                saved = data.get("settings", {})
+                # Merge saved over defaults so missing keys use defaults
+                self._settings = DEFAULT_SETTINGS.copy()
+                self._settings.update(saved)
+                # If expiry_date was saved as empty, reinstate default
+                if not self._settings.get("expiry_date"):
+                    self._settings["expiry_date"] = DEFAULT_SETTINGS.get("expiry_date", "")
                 logger.info("Settings loaded from %s", self.config_file)
             else:
                 logger.info("No config file found, using defaults")

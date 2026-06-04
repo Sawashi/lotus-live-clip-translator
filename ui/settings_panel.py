@@ -97,10 +97,10 @@ class SettingsPanel(QWidget):
         buf_row.addWidget(QLabel("Buffer:"))
         self._buffer_slider = WheelIgnoringSlider(Qt.Orientation.Horizontal)
         self._buffer_slider.setRange(5, 50)
-        self._buffer_slider.setValue(20)
+        self._buffer_slider.setValue(19)
         self._buffer_slider.valueChanged.connect(self._emit_change)
         buf_row.addWidget(self._buffer_slider, 1)
-        self._buffer_label = QLabel("2.0s")
+        self._buffer_label = QLabel("1.9s")
         self._buffer_label.setFixedWidth(36)
         self._buffer_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._buffer_slider.valueChanged.connect(
@@ -109,7 +109,7 @@ class SettingsPanel(QWidget):
         buf_row.addWidget(self._buffer_label)
         audio_layout.addLayout(buf_row)
 
-        buf_note = QLabel("Lower buffer if speaking fast, increase if slow.\nGood range: 1.5s – 2.0s")
+        buf_note = QLabel("Lower buffer if speaking slow, increase if fast.\nGood range: 1.5s – 2.0s")
         buf_note.setStyleSheet("color: #888; font-size: 10px; font-style: italic;")
         buf_note.setWordWrap(True)
         audio_layout.addWidget(buf_note)
@@ -391,6 +391,8 @@ class SettingsPanel(QWidget):
         self._font_slider.setValue(24)
         self._opacity_slider.setValue(70)
         self._spacing_slider.setValue(12)
+        self._buffer_slider.setValue(19)
+        self._buffer_label.setText("1.9s")
         self._source_lang.setCurrentIndex(0)  # English
         # target rebuilds via _on_source_lang_changed → _rebuild_target_lang which picks vi
         self._display_mode.setCurrentText("Bilingual")
@@ -478,7 +480,7 @@ class SettingsPanel(QWidget):
         self._selected_color = settings.get("font_color", "#FFFFFF")
         self._opacity_slider.setValue(int(settings.get("overlay_opacity", 0.7) * 100))
         self._spacing_slider.setValue(int(settings.get("line_spacing", 1.2) * 10))
-        buf = settings.get("buffer_duration", 2.0)
+        buf = settings.get("buffer_duration", 1.9)
         self._buffer_slider.setValue(int(buf * 10))
         self._buffer_label.setText(f"{buf:.1f}s")
 
