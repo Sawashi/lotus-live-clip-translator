@@ -7,6 +7,26 @@ as a floating overlay.
 
 import os
 import sys
+
+# Point to cuDNN 9 DLLs (which are compatible but need path registration)
+def _add_cudnn_path():
+    import site
+    search_patterns = [
+        os.path.join(os.path.dirname(sys.executable), "Lib", "site-packages", "nvidia", "cudnn", "bin"),
+        os.path.join(sys.prefix, "Lib", "site-packages", "nvidia", "cudnn", "bin"),
+    ]
+    for sp in site.getsitepackages():
+        search_patterns.append(os.path.join(sp, "nvidia", "cudnn", "bin"))
+
+    for path in search_patterns:
+        if os.path.isdir(path) and any("cudnn" in f for f in os.listdir(path)):
+            # Use PATH instead of add_dll_directory
+            os.environ["PATH"] = path + os.pathsep + os.environ.get("PATH", "")
+            return True
+    return False
+
+_add_cudnn_path()
+
 import io
 import logging
 from logging.handlers import RotatingFileHandler

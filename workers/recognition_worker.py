@@ -16,7 +16,6 @@ from speech.whisper_engine import WhisperEngine
 logger = logging.getLogger(__name__)
 
 SAMPLE_RATE = 16000
-DEDUP_THRESHOLD = 0.7  # Similarity ratio to consider text a duplicate
 SILENCE_THRESHOLD = 0.005  # RMS energy below this = silence
 SILENCE_RESET_SECONDS = 1.0  # Continuous silence triggers state reset
 
@@ -43,10 +42,6 @@ class RecognitionWorker(threading.Thread):
         self._buffer = np.array([], dtype=np.float32)
         self._model_loaded = threading.Event()
         self._chunk_duration = chunk_duration
-        # Dedup state
-        self._last_text = ""
-        self._last_text_count = 0
-        self._max_repeat = 1  # Allow same text once, then suppress
         # Silence detection for graceful reset between clips
         self._silence_start = None  # time.time() when silence began
         self._reset_sent = False  # prevent sending multiple resets
@@ -93,54 +88,6 @@ class RecognitionWorker(threading.Thread):
     def device(self) -> str:
         return self._engine.device
 
-    def _is_duplicate(self, text: str) -> bool:
-        """Check if text is a duplicate of the last transcribed text.
-
-        Uses simple character-level similarity to catch repeated phrases
-        that span chunk boundaries.
-        """
-        if not text or not self._last_text:
-            self._last_text = text
-            self._last_text_count = 1
-            return False
-
-        # Quick check: exact match
-        if text == self._last_text:
-            self._last_text_count += 1
-            if self._last_text_count > self._max_repeat:
-                logger.debug("Dedup: exact repeat '%s' (x%d)", text[:30], self._last_text_count)
-                return True
-            return False
-
-        # Check if one is a substring of the other (common for chunk-boundary repeats)
-        shorter = text if len(text) <= len(self._last_text) else self._last_text
-        longer = self._last_text if len(text) <= len(self._last_text) else text
-        if len(shorter) > 3 and shorter in longer:
-            logger.debug("Dedup: substring match '%s' in '%s'", shorter[:30], longer[:30])
-            self._last_text = text
-            self._last_text_count = 1
-            return True
-
-        # Character-level similarity for partial repeats
-        if len(text) > 3 and len(self._last_text) > 3:
-            # Count common leading characters
-            common = 0
-            for a, b in zip(text.lower(), self._last_text.lower()):
-                if a == b:
-                    common += 1
-                else:
-                    break
-            similarity = common / max(len(text), len(self._last_text))
-            if similarity > DEDUP_THRESHOLD:
-                logger.debug("Dedup: similarity %.2f '%s' ~ '%s'", similarity, text[:30], self._last_text[:30])
-                self._last_text = text
-                self._last_text_count = 1
-                return True
-
-        self._last_text = text
-        self._last_text_count = 1
-        return False
-
     def set_buffer_duration(self, seconds: float):
         """Set chunk duration for audio processing."""
         self._chunk_duration = max(0.5, min(10.0, seconds))
@@ -159,8 +106,6 @@ class RecognitionWorker(threading.Thread):
                 logger.debug("Silence detected for %.1f sec → resetting state", SILENCE_RESET_SECONDS)
                 # Clear internal state
                 self._buffer = np.array([], dtype=np.float32)
-                self._last_text = ""
-                self._last_text_count = 0
                 # Signal downstream workers to reset
                 self._text_queue.put({"type": "reset"})
                 self._reset_sent = True
@@ -203,9 +148,6 @@ class RecognitionWorker(threading.Thread):
                 for seg in segments:
                     if seg["text"]:
                         text = seg["text"].strip()
-                        # Dedup check
-                        if self._is_duplicate(text):
-                            continue
                         try:
                             _original_stdout.write(f"[RECOGNIZED] {text}\n")
                             _original_stdout.flush()

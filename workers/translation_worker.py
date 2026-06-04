@@ -42,11 +42,8 @@ class TranslationWorker(threading.Thread):
         self._status = "not_ready"
         self._status_detail = ""
         self._engines_checked = False
-        # Dedup: skip if same text already processed
         self._last_original = ""
         self._last_translated = ""
-        self._dedup_cooldown = 3.0  # seconds before same text can appear again
-        self._last_timestamp = 0.0
 
     def run(self):
         """Run the translation loop."""
@@ -65,7 +62,6 @@ class TranslationWorker(threading.Thread):
                     logger.debug("Translation worker: received reset signal, clearing state")
                     self._last_original = ""
                     self._last_translated = ""
-                    self._last_timestamp = 0.0
                     # Forward reset to overlay
                     self._subtitle_queue.put({"type": "reset"})
                     continue
@@ -80,28 +76,12 @@ class TranslationWorker(threading.Thread):
 
                 text = msg["text"]
 
-                # Dedup: skip if same text already processed recently
-                if text == self._last_original:
-                    elapsed = time.time() - self._last_timestamp
-                    if elapsed < self._dedup_cooldown:
-                        logger.debug("Dedup: skipping repeat '%s' (%.1fs ago)", text[:30], elapsed)
-                        continue
-                    # Re-send last translation (same text, but refresh display)
-                    self._subtitle_queue.put({
-                        "original": text,
-                        "translated": self._last_translated,
-                        "timestamp": msg["timestamp"]
-                    })
-                    self._last_timestamp = time.time()
-                    continue
-
                 translated = self._translate(text)
                 if translated:
                     logger.debug("Translated: '%s' → '%s'", text[:30], translated[:30])
 
                 self._last_original = text
                 self._last_translated = translated
-                self._last_timestamp = time.time()
 
                 self._subtitle_queue.put({
                     "original": text,

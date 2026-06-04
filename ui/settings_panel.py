@@ -523,11 +523,14 @@ class SettingsPanel(QWidget):
             poller = threading.Thread(target=_poll_progress, daemon=True)
             poller.start()
             try:
+                import torch
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+                compute = "int8"  # int8 avoids cuDNN dependency on Windows
                 from faster_whisper import WhisperModel
                 _ = WhisperModel(
                     selected,
-                    device="cpu",
-                    compute_type="int8",
+                    device=device,
+                    compute_type=compute,
                     download_root=self._model_dir()
                 )
                 self._update_model_download_status()

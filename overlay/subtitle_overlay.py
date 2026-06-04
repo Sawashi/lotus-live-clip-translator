@@ -164,12 +164,11 @@ class SubtitleOverlay(QWidget):
     # ---- Display settings ----
 
     def set_font_size(self, size: int):
-        """Update font size for all labels."""
+        """Update font size for all labels without resizing the window."""
         self._font_size = size
         font = QFont("Segoe UI", size)
         for label in self._labels:
             label.setFont(font)
-        self.adjustSize()
 
     def set_font_color(self, color_hex: str):
         """Update text color."""
@@ -278,7 +277,10 @@ class SubtitleOverlay(QWidget):
         self.resize(w, h)
 
     def apply_settings(self, settings: dict):
-        """Apply all visual settings from a settings dict."""
+        """Apply all visual settings from a settings dict.
+        
+        Only restores position/size on initial load (not on live settings changes).
+        """
         if "font_size" in settings:
             self.set_font_size(settings["font_size"])
         if "font_color" in settings:
@@ -289,4 +291,6 @@ class SubtitleOverlay(QWidget):
             self.set_line_spacing(settings["line_spacing"])
         if "display_mode" in settings:
             self.set_display_mode(settings["display_mode"])
-        self.restore_position(settings)
+        # Only restore position/size if explicitly provided (initial load)
+        if "overlay_x" in settings or "overlay_y" in settings:
+            self.restore_position(settings)

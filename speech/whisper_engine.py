@@ -13,6 +13,16 @@ logger = logging.getLogger(__name__)
 
 MODEL_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models")
 
+# Hallucination detection thresholds
+NO_SPEECH_THRESHOLD = 0.8  # Only filter if model is very confident it's silence
+COMPRESSION_RATIO_THRESHOLD = 2.0  # High compression ratio = repetitive hallucination
+# Common Whisper hallucinations on silence by language
+HALLUCINATED_PHRASES = {
+    "ご視聴ありがとうございました",
+    "ありがとうございました",
+    "ご視聴ありがとうございます",
+}
+
 
 class WhisperEngine:
     """Whisper-based speech recognition engine."""
@@ -79,11 +89,64 @@ class WhisperEngine:
             logger.error("Failed to load Whisper model: %s", e)
 
     def _detect_device(self) -> tuple:
-        """Detect best available device (CUDA > CPU)."""
-        import torch
-        if torch.cuda.is_available():
-            return "cuda", "float16"
+        """Detect best available device (CUDA > DirectML > CPU)."""
+        logger.info("Detecting compute device...")
+        gpu_compute = "int8"
+
+        # 1) CUDA (NVIDIA GPUs)
+        try:
+            import torch
+            if torch.cuda.is_available():
+                logger.info("GPU detected: NVIDIA CUDA (compute=%s)", gpu_compute)
+                return "cuda", gpu_compute
+        except ImportError:
+            pass
+        # 2) DirectML
+        try:
+            import torch_directml
+            dml = torch_directml.device()
+            if dml is not None:
+                logger.info("GPU detected: DirectML (compute=%s)", gpu_compute)
+                return "dml", gpu_compute
+        except ImportError:
+            pass
+        # 3) ctranslate2 DML
+        try:
+            from ctranslate2 import get_supported_device
+            devices = get_supported_device()
+            if "dml" in devices:
+                logger.info("GPU detected: DirectML (ctranslate2 native, compute=%s)", gpu_compute)
+                return "dml", gpu_compute
+        except ImportError:
+            pass
+        logger.info("No GPU detected, falling back to CPU")
         return "cpu", "int8"
+
+    def _is_hallucination(self, seg) -> bool:
+        """Check if a segment is likely a hallucination on silence."""
+        text = seg.text.strip()
+        if not text:
+            return True
+
+        # 1) Known hallucination phrases
+        if text in HALLUCINATED_PHRASES:
+            logger.debug("Hallucination: known phrase '%s'", text[:40])
+            return True
+
+        # 2) High no_speech_prob (only if also very short — real speech with noise
+        #    can have mid-range no_speech_prob)
+        no_speech = getattr(seg, "no_speech_prob", 0.0)
+        if no_speech > NO_SPEECH_THRESHOLD and len(text) < 30:
+            logger.debug("Hallucination: no_speech=%.2f text='%s'", no_speech, text[:40])
+            return True
+
+        # 3) High compression ratio = repetitive/looping text (hallucination pattern)
+        comp_ratio = getattr(seg, "compression_ratio", 0.0)
+        if comp_ratio > COMPRESSION_RATIO_THRESHOLD:
+            logger.debug("Hallucination: compression_ratio=%.2f text='%s'", comp_ratio, text[:40])
+            return True
+
+        return False
 
     def transcribe(self, audio_data: np.ndarray, language: str = None) -> list:
         """Transcribe audio data.
@@ -110,17 +173,24 @@ class WhisperEngine:
             )
 
             results = []
+            filtered = 0
             for seg in segments:
+                if self._is_hallucination(seg):
+                    filtered += 1
+                    continue
+
+                text = seg.text.strip()
                 results.append({
-                    "text": seg.text.strip(),
+                    "text": text,
                     "start": seg.start,
                     "end": seg.end
                 })
 
             logger.debug(
-                "Transcribed %.2f sec audio: %d segments, language=%s prob=%.2f",
+                "Transcribed %.2f sec audio: %d results (%d filtered), language=%s prob=%.2f",
                 len(audio_data) / 16000,
                 len(results),
+                filtered,
                 info.language,
                 info.language_probability
             )
