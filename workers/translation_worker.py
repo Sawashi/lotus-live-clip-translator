@@ -48,8 +48,8 @@ class TranslationWorker(threading.Thread):
         self._running = True
         logger.info("Translation worker started")
 
-        # Check all engines in background for status display
-        self._check_all_engines()
+        # Check engines in background thread (don't block startup)
+        threading.Thread(target=self._check_all_engines, daemon=True).start()
 
         while self._running:
             try:
@@ -63,7 +63,8 @@ class TranslationWorker(threading.Thread):
                     continue
 
                 translated = self._translate(msg["text"])
-                print(f"[TRANSLATED] {translated}" if translated else "[TRANSLATED] (no translation)")
+                if translated:
+                    logger.debug("Translated: '%s' → '%s'", msg["text"][:30], translated[:30])
                 self._subtitle_queue.put({
                     "original": msg["text"],
                     "translated": translated,
@@ -141,9 +142,10 @@ class TranslationWorker(threading.Thread):
         logger.info("Engine check complete. Status: %s", self._status)
 
     def _translate(self, text: str) -> str:
-        """Translate text using ONLY the user-selected engine mode.
+        """Translate text using the user-selected engine mode.
 
-        No fallback cascade. If the selected engine fails, returns empty string.
+        If the selected engine fails, returns the original text as fallback
+        so the user still sees subtitles.
         """
         if self._source_language == "auto":
             logger.debug("Source=auto, passing through: '%s'", text[:50])
@@ -151,42 +153,40 @@ class TranslationWorker(threading.Thread):
 
         try:
             if self._mode == TRANSLATION_MODE_ONLINE:
-                # Only use LibreTranslate
                 result = self._libre.translate(
                     text, self._source_language, self._target_language
                 )
                 if result:
                     self._status = "online"
                     return result
-                logger.warning("LibreTranslate returned no result")
+                logger.warning("LibreTranslate returned no result, falling back to original")
 
             elif self._mode == TRANSLATION_MODE_LTENGINE:
-                # Only use LTEngine
                 result = self._ltengine.translate(
                     text, self._source_language, self._target_language
                 )
                 if result:
                     self._status = "ltengine"
                     return result
-                logger.warning("LTEngine returned no result")
+                logger.warning("LTEngine returned no result, falling back to original")
 
             else:
-                # Offline mode - only use Argos
+                # Offline mode - Argos
                 result = self._argos.translate(
                     text, self._source_language, self._target_language
                 )
                 if result:
                     self._status = "offline"
                     return result
-                logger.warning("Argos returned no result")
+                logger.warning("Argos returned no result, falling back to original")
 
             self._update_status()
-            return ""
+            return text  # Fallback: show original text
 
         except Exception as e:
-            logger.error("Translation error: %s", e)
+            logger.error("Translation error: %s, falling back to original", e)
             self._update_status()
-            return ""
+            return text  # Fallback: show original text
 
     def _update_status(self):
         """Update the status indicator based on current mode and engine availability."""

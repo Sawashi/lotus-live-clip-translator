@@ -100,15 +100,13 @@ class WhisperEngine:
             return []
 
         try:
+            # VAD disabled for real-time loopback capture — it's too aggressive
+            # and discards most audio from WASAPI loopback
             segments, info = self._model.transcribe(
                 audio_data,
                 language=language if language != "auto" else None,
                 beam_size=5,
-                vad_filter=True,
-                vad_parameters=dict(
-                    min_silence_duration_ms=300,
-                    threshold=0.5
-                )
+                vad_filter=False,
             )
 
             results = []

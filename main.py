@@ -7,8 +7,15 @@ as a floating overlay.
 
 import os
 import sys
+import io
 import logging
 from logging.handlers import RotatingFileHandler
+
+# Redirect stdout to suppress argostranslate print() spam BEFORE any imports
+# argostranslate.translate_functions uses print() directly at module level
+# This must happen before any argostranslate import
+_original_stdout = sys.stdout
+sys.stdout = io.StringIO()
 
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt
@@ -36,8 +43,41 @@ def setup_logging():
     root_logger.setLevel(logging.INFO)
     root_logger.addHandler(handler)
 
-    # Also log to console for development
-    console = logging.StreamHandler()
+    # Suppress verbose third-party loggers
+    for logger_name in [
+        "argostranslate",
+        "argostranslate.utils",
+        "stanza",
+        "sentence_splitter",
+        "sacremoses",
+        "tokenizers",
+        "transformers",
+        "httpx",
+        "httpcore",
+        "urllib3",
+        "faster_whisper",
+        "ctranslate2",
+    ]:
+        logging.getLogger(logger_name).setLevel(logging.WARNING)
+
+    # Console handler - wrap stdout with errors='replace' to handle unicode
+    # Windows console uses cp437/cp1252 which can't encode Japanese chars
+    class SafeStreamHandler(logging.StreamHandler):
+        """StreamHandler that replaces unencodable characters instead of crashing."""
+        def emit(self, record):
+            try:
+                super().emit(record)
+            except UnicodeEncodeError:
+                # Fallback: strip non-ASCII for console output
+                msg = self.format(record)
+                safe = msg.encode('ascii', errors='replace').decode('ascii')
+                try:
+                    _original_stdout.write(safe + '\n')
+                    _original_stdout.flush()
+                except Exception:
+                    pass
+
+    console = SafeStreamHandler(_original_stdout)
     console.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
     root_logger.addHandler(console)
 

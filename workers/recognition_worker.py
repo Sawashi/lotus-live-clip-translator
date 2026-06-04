@@ -108,7 +108,10 @@ class RecognitionWorker(threading.Thread):
 
                 for seg in segments:
                     if seg["text"]:
-                        print(f"[RECOGNIZED] {seg['text']}")
+                        try:
+                            print(f"[RECOGNIZED] {seg['text']}")
+                        except UnicodeEncodeError:
+                            pass  # Windows console can't print some chars
                         self._text_queue.put({
                             "type": "transcription",
                             "text": seg["text"],
