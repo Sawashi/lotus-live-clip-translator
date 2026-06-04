@@ -11,7 +11,7 @@ import queue
 import logging
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
-    QSplitter, QMessageBox
+    QSplitter, QMessageBox, QScrollArea
 )
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QAction
@@ -63,8 +63,8 @@ class MainWindow(QMainWindow):
     def _init_ui(self):
         """Initialize the main window UI."""
         self.setWindowTitle("Live Translate Overlay")
-        self.setMinimumSize(400, 600)
-        self.resize(420, 700)
+        self.setMinimumSize(480, 700)
+        self.resize(520, 800)
 
         # Central widget with horizontal splitter
         central = QWidget()
@@ -73,12 +73,17 @@ class MainWindow(QMainWindow):
         layout = QHBoxLayout(central)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # Settings panel
+        # Settings panel (scrollable)
         self._settings_panel = SettingsPanel()
         self._settings_panel.settings_changed.connect(self._on_settings_changed)
         self._settings_panel.capture_toggled.connect(self._on_capture_toggled)
 
-        layout.addWidget(self._settings_panel)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(self._settings_panel)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("QScrollArea { border: none; }")
+        layout.addWidget(scroll)
 
         # Apply light/dark theme
         self._apply_theme("dark")
@@ -194,6 +199,8 @@ class MainWindow(QMainWindow):
                 QPushButton:hover { background-color: #d0d0d0; }
                 QComboBox { background-color: white; border: 1px solid #bbb;
                             border-radius: 3px; padding: 3px; }
+                QScrollArea { background-color: #f5f5f5; border: none; }
+                QScrollArea > QWidget > QWidget { background-color: #f5f5f5; }
                 QSlider::groove:horizontal { height: 6px; background: #ddd; }
                 QSlider::handle:horizontal { width: 14px; margin: -4px 0; }
             """)
@@ -214,6 +221,11 @@ class MainWindow(QMainWindow):
                 QComboBox QAbstractItemView { background-color: #2d2d2d;
                                               color: #ddd; selection-background-color: #444; }
                 QCheckBox { color: #ccc; }
+                QScrollArea { background-color: #1e1e1e; border: none; }
+                QScrollArea > QWidget > QWidget { background-color: #1e1e1e; }
+                QScrollBar:vertical { background: #2d2d2d; width: 10px; border: none; }
+                QScrollBar::handle:vertical { background: #555; min-height: 30px; border-radius: 4px; }
+                QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
                 QSlider::groove:horizontal { height: 6px; background: #444; }
                 QSlider::handle:horizontal { width: 14px; margin: -4px 0;
                                              background: #888; border-radius: 7px; }
@@ -343,13 +355,21 @@ class MainWindow(QMainWindow):
     # ---- Subtitle Processing ----
 
     def _process_subtitle_queue(self):
-        """Process incoming subtitle data from the translation worker."""
+        """Process incoming subtitle data from the translation worker.
+
+        Drains the queue but only applies the LAST item to avoid
+        showing stale intermediate results.
+        """
+        last_msg = None
         try:
             while True:
                 msg = self._subtitle_queue.get_nowait()
-                self._overlay.set_subtitles(msg["original"], msg["translated"])
+                last_msg = msg  # Keep overwriting — only the last one matters
         except queue.Empty:
             pass
+
+        if last_msg is not None:
+            self._overlay.set_subtitles(last_msg["original"], last_msg["translated"])
 
         # Update translation status if worker is running
         if self._translation_worker:

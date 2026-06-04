@@ -2,6 +2,7 @@
 
 Processes audio chunks from the audio queue using faster-whisper.
 Feeds transcribed text into a queue for the translation worker.
+Includes deduplication to prevent repeating the same text.
 """
 
 import queue
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 CHUNK_DURATION = 2.0  # Seconds of audio to process at a time
 SAMPLE_RATE = 16000
+DEDUP_THRESHOLD = 0.7  # Similarity ratio to consider text a duplicate
 
 
 class RecognitionWorker(threading.Thread):
@@ -34,6 +36,10 @@ class RecognitionWorker(threading.Thread):
         self._language = "auto"
         self._buffer = np.array([], dtype=np.float32)
         self._model_loaded = threading.Event()
+        # Dedup state
+        self._last_text = ""
+        self._last_text_count = 0
+        self._max_repeat = 2  # Allow same text up to 2 times, then suppress
 
     def run(self):
         """Run the recognition loop."""
@@ -77,6 +83,54 @@ class RecognitionWorker(threading.Thread):
     def device(self) -> str:
         return self._engine.device
 
+    def _is_duplicate(self, text: str) -> bool:
+        """Check if text is a duplicate of the last transcribed text.
+
+        Uses simple character-level similarity to catch repeated phrases
+        that span chunk boundaries.
+        """
+        if not text or not self._last_text:
+            self._last_text = text
+            self._last_text_count = 1
+            return False
+
+        # Quick check: exact match
+        if text == self._last_text:
+            self._last_text_count += 1
+            if self._last_text_count > self._max_repeat:
+                logger.debug("Dedup: exact repeat '%s' (x%d)", text[:30], self._last_text_count)
+                return True
+            return False
+
+        # Check if one is a substring of the other (common for chunk-boundary repeats)
+        shorter = text if len(text) <= len(self._last_text) else self._last_text
+        longer = self._last_text if len(text) <= len(self._last_text) else text
+        if len(shorter) > 3 and shorter in longer:
+            logger.debug("Dedup: substring match '%s' in '%s'", shorter[:30], longer[:30])
+            self._last_text = text
+            self._last_text_count = 1
+            return True
+
+        # Character-level similarity for partial repeats
+        if len(text) > 3 and len(self._last_text) > 3:
+            # Count common leading characters
+            common = 0
+            for a, b in zip(text.lower(), self._last_text.lower()):
+                if a == b:
+                    common += 1
+                else:
+                    break
+            similarity = common / max(len(text), len(self._last_text))
+            if similarity > DEDUP_THRESHOLD:
+                logger.debug("Dedup: similarity %.2f '%s' ~ '%s'", similarity, text[:30], self._last_text[:30])
+                self._last_text = text
+                self._last_text_count = 1
+                return True
+
+        self._last_text = text
+        self._last_text_count = 1
+        return False
+
     def _process_loop(self):
         """Process audio chunks from the queue."""
         chunk_samples = int(CHUNK_DURATION * SAMPLE_RATE)
@@ -108,13 +162,17 @@ class RecognitionWorker(threading.Thread):
 
                 for seg in segments:
                     if seg["text"]:
+                        text = seg["text"].strip()
+                        # Dedup check
+                        if self._is_duplicate(text):
+                            continue
                         try:
-                            print(f"[RECOGNIZED] {seg['text']}")
+                            print(f"[RECOGNIZED] {text}")
                         except UnicodeEncodeError:
                             pass  # Windows console can't print some chars
                         self._text_queue.put({
                             "type": "transcription",
-                            "text": seg["text"],
+                            "text": text,
                             "language": self._language,
                             "timestamp": time.time()
                         })
