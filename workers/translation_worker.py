@@ -1,6 +1,7 @@
 """Translation worker thread.
 
-Processes transcribed text and translates it using Argos Translate (offline).
+Processes transcribed text and translates it using either
+Argos Translate (offline) or Small100 (offline) engine.
 """
 
 import queue
@@ -11,7 +12,8 @@ from translation.argos_engine import ArgosEngine
 
 logger = logging.getLogger(__name__)
 
-TRANSLATION_MODE_OFFLINE = "offline"
+ENGINE_ARGOS = "argos"
+ENGINE_SMALL100 = "small100"
 
 
 class TranslationWorker(threading.Thread):
@@ -20,12 +22,16 @@ class TranslationWorker(threading.Thread):
     def __init__(
         self,
         text_queue: queue.Queue,
-        subtitle_queue: queue.Queue
+        subtitle_queue: queue.Queue,
+        engine_type: str = ENGINE_ARGOS,
     ):
         super().__init__(daemon=True)
         self._text_queue = text_queue
         self._subtitle_queue = subtitle_queue
+        self._engine_type = engine_type
         self._argos = ArgosEngine()
+        self._small100 = None  # lazy init
+        self._current_engine = None  # active engine instance
         self._running = False
         self._enabled = True
         self._source_language = "auto"
@@ -40,7 +46,7 @@ class TranslationWorker(threading.Thread):
     def run(self):
         """Run the translation loop."""
         self._running = True
-        logger.info("Translation worker started")
+        logger.info("Translation worker started (engine=%s)", self._engine_type)
 
         # Check engines in background thread
         threading.Thread(target=self._check_all_engines, daemon=True).start()
@@ -96,6 +102,12 @@ class TranslationWorker(threading.Thread):
         self._mode = mode
         self._update_status()
 
+    def set_engine(self, engine_type: str):
+        """Change translation engine type."""
+        self._engine_type = engine_type
+        self._current_engine = None  # force re-init
+        self._update_status()
+
     def set_languages(self, source: str, target: str, mode: str = "direct"):
         """Set source and target languages with translation mode."""
         self._source_language = source
@@ -113,25 +125,46 @@ class TranslationWorker(threading.Thread):
             if not self._engines_checked:
                 return "Not ready (checking engines...)"
             return f"Not ready ({self._status_detail})"
-        return self._status.capitalize()
+        return f"{self._status.capitalize()} ({self._engine_type})"
+
+    @property
+    def engine_type(self) -> str:
+        return self._engine_type
+
+    def _get_engine(self):
+        """Get or initialize the active engine."""
+        if self._current_engine is not None:
+            return self._current_engine
+
+        if self._engine_type == ENGINE_SMALL100:
+            if self._small100 is None:
+                from translation.small100_engine import Small100Engine
+                self._small100 = Small100Engine()
+            self._current_engine = self._small100
+        else:
+            self._current_engine = self._argos
+
+        return self._current_engine
 
     def _check_all_engines(self):
         """Check translation engine and update status."""
         self._engines_checked = False
 
-        self._status_detail = "checking argos..."
-        logger.info("Checking Argos Translate...")
-        if self._argos.is_ready:
-            logger.info("Argos Translate: ready")
+        engine = self._get_engine()
+        self._status_detail = f"checking {self._engine_type}..."
+        logger.info("Checking %s ...", self._engine_type)
+
+        if engine.is_ready:
+            logger.info("%s: ready", self._engine_type)
         else:
-            logger.info("Argos Translate: not ready (no packages installed)")
+            logger.info("%s: not ready", self._engine_type)
 
         self._engines_checked = True
         self._update_status()
         logger.info("Engine check complete. Status: %s", self._status)
 
     def _translate(self, text: str) -> str:
-        """Translate text using Argos Translate.
+        """Translate text using the active engine.
 
         If it fails, returns the original text as fallback.
         """
@@ -140,18 +173,19 @@ class TranslationWorker(threading.Thread):
             return text
 
         try:
-            if self._target_mode == "hop2":
+            engine = self._get_engine()
+            if self._engine_type == ENGINE_ARGOS and self._target_mode == "hop2":
                 result = self._argos.translate_via_english(
                     text, self._source_language, self._target_language
                 )
             else:
-                result = self._argos.translate(
+                result = engine.translate(
                     text, self._source_language, self._target_language
                 )
             if result:
                 self._status = "offline"
                 return result
-            logger.warning("Argos returned no result, falling back to original")
+            logger.warning("%s returned no result, falling back to original", self._engine_type)
 
             self._update_status()
             return text
@@ -163,11 +197,12 @@ class TranslationWorker(threading.Thread):
 
     def _update_status(self):
         """Update the status indicator."""
-        if self._argos.is_ready:
+        engine = self._get_engine()
+        if engine.is_ready:
             self._status = "offline"
         else:
             self._status = "not_ready"
-            self._status_detail = "Argos packages not installed"
+            self._status_detail = f"{self._engine_type} not loaded"
 
     def install_argos_package(self, from_code: str, to_code: str) -> bool:
         """Install an Argos translation package."""

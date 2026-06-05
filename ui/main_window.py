@@ -43,6 +43,7 @@ class MainWindow(QMainWindow):
         self._capture_worker = None
         self._recognition_worker = None
         self._translation_worker = None
+        self._current_engine = "argos"
 
         # UI
         self._overlay = None
@@ -234,8 +235,10 @@ class MainWindow(QMainWindow):
                 model_size=settings["whisper_model"],
                 chunk_duration=chunk_duration
             )
+            engine = settings.get("translation_engine", "argos")
+            self._current_engine = engine
             self._translation_worker = TranslationWorker(
-                self._text_queue, self._subtitle_queue
+                self._text_queue, self._subtitle_queue, engine_type=engine
             )
 
             self._recognition_worker.set_language(settings["source_language"])
@@ -381,7 +384,7 @@ class MainWindow(QMainWindow):
             "Lotus Translator v1.0.0\n\n"
             "Real-time speech recognition and translation overlay.\n\n"
             "Captures system audio via WASAPI Loopback.\n"
-            "Powered by faster-whisper and Argos Translate.\n\n"
+            "Powered by faster-whisper, Argos Translate, and Small100.\n\n"
             "Credit by Sawashi - Kiet Le"
         )
 

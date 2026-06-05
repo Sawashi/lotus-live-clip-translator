@@ -5,14 +5,15 @@ subtitles over any application. Supports drag and click-through modes.
 """
 
 import logging
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QSizeGrip
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QSizeGrip, QApplication
 from PyQt6.QtCore import Qt, QPoint, QTimer, pyqtSignal, QRect
-from PyQt6.QtGui import QPainter, QColor, QFont, QFontMetrics, QPalette, QPen
+from PyQt6.QtGui import QPainter, QColor, QFont, QFontMetrics, QPen, QScreen
 
 logger = logging.getLogger(__name__)
 
 MAX_LINES = 3
 FADE_TIMEOUT = 5000  # ms
+MAX_WIDTH_FRAC = 0.85  # overlay max width = 85% of screen width
 
 
 class SubtitleLabel(QLabel):
@@ -110,6 +111,13 @@ class SubtitleOverlay(QWidget):
             painter.drawRoundedRect(self.rect().adjusted(0, 0, 0, 0), 8, 8)
         super().paintEvent(event)
 
+    def _get_max_overlay_width(self) -> int:
+        """Get max allowed overlay width based on screen size."""
+        screen = QApplication.primaryScreen()
+        if screen:
+            return int(screen.availableSize().width() * MAX_WIDTH_FRAC)
+        return 1400  # fallback
+
     def set_subtitles(self, original: str, translated: str):
         """Update displayed subtitles.
 
@@ -121,6 +129,11 @@ class SubtitleOverlay(QWidget):
             self._set_label_text(translated, "")
         else:  # bilingual
             self._set_label_text(original, translated)
+
+        # Clamp width to prevent overflow beyond screen
+        max_w = self._get_max_overlay_width()
+        if self.width() > max_w:
+            self.resize(max_w, self.height())
 
         # Reset fade timer
         self._fade_timer.start(FADE_TIMEOUT)
@@ -278,7 +291,7 @@ class SubtitleOverlay(QWidget):
 
     def apply_settings(self, settings: dict):
         """Apply all visual settings from a settings dict.
-        
+
         Only restores position/size on initial load (not on live settings changes).
         """
         if "font_size" in settings:
@@ -294,3 +307,18 @@ class SubtitleOverlay(QWidget):
         # Only restore position/size if explicitly provided (initial load)
         if "overlay_x" in settings or "overlay_y" in settings:
             self.restore_position(settings)
+
+    # ---- Reset / Center ----
+
+    def center_on_screen_and_reset_size(self):
+        """Move overlay to screen center and reset to default size."""
+        screen = QApplication.primaryScreen()
+        if not screen:
+            return
+        geo = screen.availableGeometry()
+        w, h = 800, 200
+        x = geo.x() + (geo.width() - w) // 2
+        y = geo.y() + (geo.height() - h) // 2
+        self.move(x, y)
+        self.resize(w, h)
+        self.position_changed.emit(x, y)

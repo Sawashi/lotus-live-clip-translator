@@ -62,8 +62,10 @@ class SettingsPanel(QWidget):
         super().__init__(parent)
         self._lang_data = load_languages()
         self._argos_pairs = self._lang_data.get("argos_pairs", {})
+        self._small100_pairs = self._lang_data.get("small100_pairs", {})
         self._selected_color = "#FFFFFF"
         self._capturing = False
+        self._engine = "argos"  # default
         self._init_ui()
 
     def _init_ui(self):
@@ -186,6 +188,18 @@ class SettingsPanel(QWidget):
         self._translation_toggle.setChecked(True)
         self._translation_toggle.stateChanged.connect(self._emit_change)
         trans_layout.addWidget(self._translation_toggle)
+
+        # Engine selector
+        engine_row = QHBoxLayout()
+        engine_row.setSpacing(6)
+        engine_row.addWidget(QLabel("Engine:"))
+        self._engine_selector = WheelIgnoringComboBox()
+        self._engine_selector.setMinimumWidth(160)
+        self._engine_selector.addItem("Argos Translate", "argos")
+        self._engine_selector.addItem("Small100 (M2M-100)", "small100")
+        self._engine_selector.currentIndexChanged.connect(self._on_engine_changed)
+        engine_row.addWidget(self._engine_selector, 1)
+        trans_layout.addLayout(engine_row)
 
         self._translation_status = QLabel("Translation: Not ready (checking engines...)")
         self._translation_status.setMinimumHeight(35)
@@ -322,30 +336,36 @@ class SettingsPanel(QWidget):
             combo.addItem(lang["name"], lang["code"])
 
     def _rebuild_target_lang(self, src_code: str):
-        """Rebuild target lang combo based on source.
+        """Rebuild target lang combo based on source and active engine.
 
-        Shows all languages with mode indicators:
+        For Argos:
           - no marker = direct translation (fast, 1 hop)
           - ⚠ slower = via English (2 hops: src → en → target)
+        For Small100: all pairs direct, no markers.
         """
         self._target_lang.blockSignals(True)
         self._target_lang.clear()
 
-        direct_codes = set(self._argos_pairs.get(src_code, []))
-        en_targets = set(self._argos_pairs.get("en", []))
-
-        for lang in self._lang_data.get("whisper_languages", []):
-            code = lang["code"]
-            if code == src_code:
-                continue  # skip source
-            if code in direct_codes:
-                self._target_lang.addItem(lang["name"], ("direct", code))
-            elif src_code != "en" and "en" in self._argos_pairs.get(src_code, []) and code in en_targets:
-                self._target_lang.addItem(f"{lang['name']} ⚠ slower", ("hop2", code))
-            elif src_code == "en" and code not in en_targets:
-                pass
-            elif src_code != "en" and code not in direct_codes:
-                pass
+        if self._engine == "small100":
+            pairs = self._small100_pairs
+            direct_codes = set(pairs.get(src_code, []))
+            for lang in self._lang_data.get("whisper_languages", []):
+                code = lang["code"]
+                if code == src_code:
+                    continue
+                if code in direct_codes:
+                    self._target_lang.addItem(lang["name"], ("direct", code))
+        else:
+            direct_codes = set(self._argos_pairs.get(src_code, []))
+            en_targets = set(self._argos_pairs.get("en", []))
+            for lang in self._lang_data.get("whisper_languages", []):
+                code = lang["code"]
+                if code == src_code:
+                    continue
+                if code in direct_codes:
+                    self._target_lang.addItem(lang["name"], ("direct", code))
+                elif src_code != "en" and "en" in self._argos_pairs.get(src_code, []) and code in en_targets:
+                    self._target_lang.addItem(f"{lang['name']} ⚠ slower", ("hop2", code))
 
         # Select Vietnamese if available, else first item
         vi_idx = None
@@ -361,6 +381,17 @@ class SettingsPanel(QWidget):
 
         self._target_lang.blockSignals(False)
         self._emit_change()
+
+    def _on_engine_changed(self):
+        """Engine selection changed → rebuild target options."""
+        self._engine = self._engine_selector.currentData()
+        # Show/hide the hop2 warning note
+        if self._engine == "small100":
+            self._lang_note.setVisible(False)
+        else:
+            self._lang_note.setVisible(True)
+        src = self._source_lang.currentData()
+        self._rebuild_target_lang(src)
 
     def _on_source_lang_changed(self):
         """Source language changed → rebuild target options."""
@@ -399,8 +430,13 @@ class SettingsPanel(QWidget):
         self._model_selector.setCurrentIndex(1)
         self._theme_selector.setCurrentText("Dark")
         self._translation_toggle.setChecked(True)
+        self._engine_selector.setCurrentIndex(0)  # Argos (default)
         self._selected_color = "#FFFFFF"
         self._emit_change()
+        # Reposition overlay to screen center and reset size
+        main_window = self.window()
+        if hasattr(main_window, '_overlay') and main_window._overlay:
+            main_window._overlay.center_on_screen_and_reset_size()
 
     def _on_model_selection_changed(self):
         """Update download status and emit change when model selection changes."""
@@ -429,6 +465,7 @@ class SettingsPanel(QWidget):
             "target_mode": mode,
             "translation_enabled": self._translation_toggle.isChecked(),
             "translation_mode": "offline",
+            "translation_engine": self._engine_selector.currentData(),
             "display_mode": self._display_mode.currentData(),
             "whisper_model": self._model_selector.currentData(),
             "font_size": self._font_slider.value(),
@@ -463,6 +500,14 @@ class SettingsPanel(QWidget):
                 break
 
         self._translation_toggle.setChecked(settings.get("translation_enabled", True))
+
+        # Apply engine selector
+        engine = settings.get("translation_engine", "argos")
+        for i in range(self._engine_selector.count()):
+            if self._engine_selector.itemData(i) == engine:
+                self._engine_selector.setCurrentIndex(i)
+                break
+        self._engine = engine  # sync internal state
 
         display = settings.get("display_mode", "bilingual")
         for i in range(self._display_mode.count()):

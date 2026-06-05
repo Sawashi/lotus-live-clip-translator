@@ -6,6 +6,10 @@ argostranslate==1.11.0
 requests==2.31.0
 ltengine==0.1.0
 PyInstaller==6.5.0
+transformers==4.46.0
+sentencepiece==0.2.0
+accelerate==1.1.1
+huggingface-hub==0.26.0
 # GPU (CUDA 12.4):
 torch==2.6.0+cu124
 torchaudio==2.6.0+cu124

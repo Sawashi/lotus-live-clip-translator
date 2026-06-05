@@ -13,5 +13,12 @@
     "vi": ["en"],
     "ko": ["en"],
     "auto": ["en", "ja", "zh", "vi", "ko"]
+  },
+  "small100_pairs": {
+    "en": ["ja", "zh", "vi", "ko"],
+    "ja": ["en", "zh", "vi", "ko"],
+    "zh": ["en", "ja", "vi", "ko"],
+    "vi": ["en", "ja", "zh", "ko"],
+    "ko": ["en", "ja", "zh", "vi"]
   }
 }
