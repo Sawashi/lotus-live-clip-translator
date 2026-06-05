@@ -52,10 +52,38 @@ if os.path.isdir(argos_dir):
             dst = os.path.relpath(root, PROJECT_ROOT)
             argos_data.append((src, dst))
 
+# PyInstaller hook to collect all nvidia CUDA runtime DLLs
+# Required for ctranslate2/faster-whisper CUDA support in frozen builds
+def _collect_nvidia_binaries():
+    """Find and return nvidia CUDA DLLs from site-packages."""
+    import site, glob
+    binaries = []
+    # Common patterns for nvidia pip wheels
+    patterns = [
+        "nvidia/cublas/**/*.dll",
+        "nvidia/cublas/**/*.pyd",
+        "nvidia/cudnn/**/*.dll",
+        "nvidia/cudnn/**/*.pyd",
+        "nvidia/cuda_runtime/**/*.dll",
+        "nvidia/cuda_runtime/**/*.pyd",
+        "nvidia/cuda_nvrtc/**/*.dll",
+        "nvidia/cuda_nvrtc/**/*.pyd",
+        "ctranslate2/**/*.pyd",
+        "ctranslate2/**/*.dll",
+    ]
+    for sp in site.getsitepackages()[-1:]:
+        for pat in patterns:
+            full_pat = os.path.join(sp, pat)
+            for fp in glob.glob(full_pat, recursive=True):
+                if os.path.isfile(fp):
+                    binaries.append((fp, "."))
+    return binaries
+
+
 a = Analysis(
     ['main.py'],
     pathex=[PROJECT_ROOT],
-    binaries=[],
+    binaries=_collect_nvidia_binaries(),
     datas=[
         ('config.json', '.'),
         ('languages.json', '.'),
@@ -98,10 +126,21 @@ a = Analysis(
         'huggingface_hub',
         'huggingface_hub.snapshot_download',
         'tokenization_small100',
+        # ctranslate2 CUDA support — required for frozen builds
+        'ctranslate2',
+        'ctranslate2.cuda',
+        'ctranslate2.cuda.cuda',
+        'nvidia.cublas',
+        'nvidia.cublas.lib',
+        'nvidia.cublas.lib.nvblas64',
+        'nvidia.cudnn',
+        'nvidia.cuda_runtime',
+        'nvidia.cuda_runtime.lib',
+        'nvidia.cuda_nvrtc',
     ],
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=[os.path.join(PROJECT_ROOT, 'speech', 'whisper_cuda_hook.py')],
     excludes=[
         'tkinter',
         'matplotlib',

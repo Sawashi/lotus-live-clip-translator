@@ -75,17 +75,36 @@ class Small100Engine:
         model directory because the tokenizer_config.json doesn't declare
         the class name for auto-discovery.
         """
-        try:
+        # Frozen builds: start CPU to avoid CUDA deadlock from DLL extraction race
+        if getattr(sys, 'frozen', False):
+            self._device = "cpu"
+        else:
             self._device = "cuda" if torch.cuda.is_available() else "cpu"
-            logger.info("Loading Small100 tokenizer from %s ...", self._model_dir)
-            # Put model dir on path so SMALL100Tokenizer class is importable
+
+        # Step 1: load tokenizer — must be importable from model dir or bundled
+        logger.info("Loading Small100 tokenizer from %s ...", self._model_dir)
+        try:
+            # Ensure the model dir is on sys.path for tokenizer import
             if self._model_dir not in sys.path:
                 sys.path.insert(0, self._model_dir)
-            # Import the custom tokenizer
-            from tokenization_small100 import SMALL100Tokenizer as SmallTokenizer
+            # Try explicit relative import first (works in frozen builds where
+            # tokenization_small100.py is a data file in the model directory)
+            import importlib
+            try:
+                tok_mod = importlib.import_module("tokenization_small100")
+                SmallTokenizer = tok_mod.SMALL100Tokenizer
+            except Exception:
+                # Fallback: try direct import
+                from tokenization_small100 import SMALL100Tokenizer as SmallTokenizer
             self._tokenizer = SmallTokenizer.from_pretrained(self._model_dir)
+        except Exception as e:
+            logger.error("Failed to load Small100 tokenizer: %s", e)
+            self._ready = False
+            return
 
-            logger.info("Loading Small100 model on %s ...", self._device)
+        # Step 2: load model weights
+        logger.info("Loading Small100 model on %s ...", self._device)
+        try:
             self._model = M2M100ForConditionalGeneration.from_pretrained(
                 self._model_dir
             ).to(self._device)

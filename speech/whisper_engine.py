@@ -193,34 +193,53 @@ class WhisperEngine:
                 beam_size=5,
                 vad_filter=False,
             )
-
-            results = []
-            filtered = 0
-            for seg in segments:
-                if self._is_hallucination(seg):
-                    filtered += 1
-                    continue
-
-                text = seg.text.strip()
-                results.append({
-                    "text": text,
-                    "start": seg.start,
-                    "end": seg.end
-                })
-
-            logger.debug(
-                "Transcribed %.2f sec audio: %d results (%d filtered), language=%s prob=%.2f",
-                len(audio_data) / 16000,
-                len(results),
-                filtered,
-                info.language,
-                info.language_probability
-            )
-            return results
-
         except Exception as e:
-            logger.error("Transcription error: %s", e)
-            return []
+            # Frozen build CUDA error — reload on CPU and retry once
+            if getattr(sys, 'frozen', False) and self._device == "cuda":
+                logger.error("CUDA transcribe failed: %s — retrying on CPU", e)
+                self.unload()
+                self._device = "cpu"
+                self._compute_type = "int8"
+                self.load_model()
+                if not self._loaded:
+                    return []
+                try:
+                    segments, info = self._model.transcribe(
+                        audio_data,
+                        language=language if language != "auto" else None,
+                        beam_size=5,
+                        vad_filter=False,
+                    )
+                except Exception as e2:
+                    logger.error("CPU fallback also failed: %s", e2)
+                    return []
+            else:
+                logger.error("Transcription error: %s", e)
+                return []
+
+        results = []
+        filtered = 0
+        for seg in segments:
+            if self._is_hallucination(seg):
+                filtered += 1
+                continue
+
+            text = seg.text.strip()
+            results.append({
+                "text": text,
+                "start": seg.start,
+                "end": seg.end
+            })
+
+        logger.debug(
+            "Transcribed %.2f sec audio: %d results (%d filtered), language=%s prob=%.2f",
+            len(audio_data) / 16000,
+            len(results),
+            filtered,
+            info.language,
+            info.language_probability
+        )
+        return results
 
     def unload(self):
         """Unload the model to free memory."""

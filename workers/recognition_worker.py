@@ -20,7 +20,7 @@ SILENCE_THRESHOLD = 0.005  # RMS energy below this = silence
 SILENCE_RESET_SECONDS = 1.0  # Continuous silence triggers state reset
 
 # main.py redirects stdout to suppress argostranslate spam; grab real stdout for user-facing output
-_original_stdout = sys.__stdout__
+_original_stdout = sys.__stdout__ or sys.stdout
 
 
 class RecognitionWorker(threading.Thread):

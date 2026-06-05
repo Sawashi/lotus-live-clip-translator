@@ -66,11 +66,12 @@ class SubtitleOverlay(QWidget):
         layout.setContentsMargins(20, 10, 20, 10)
         layout.setSpacing(int(self._line_spacing * 4))
 
-        # Subtitle labels
+        # Subtitle labels — ensure visible text (white default)
         self._labels = []
         for i in range(MAX_LINES):
             label = SubtitleLabel(self)
             label.setVisible(False)
+            label.setStyleSheet(f"color: {self._font_color};")
             layout.addWidget(label)
             self._labels.append(label)
 
@@ -85,6 +86,7 @@ class SubtitleOverlay(QWidget):
 
     def paintEvent(self, event):
         """Draw translucent background."""
+        super().paintEvent(event)
         if self._bg_opacity > 0:
             painter = QPainter(self)
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -94,9 +96,10 @@ class SubtitleOverlay(QWidget):
 
             if self._drag_mode:
                 # Visible border in drag mode
+                painter.save()
                 painter.setPen(QColor(100, 100, 100, 200))
                 painter.drawRect(1, 1, self.width() - 2, self.height() - 2)
-                painter.setPen(Qt.PenStyle.NoPen)
+                painter.restore()
 
                 # Resize handle indicator (bottom-right corner)
                 grip_rect = QRect(
@@ -109,7 +112,6 @@ class SubtitleOverlay(QWidget):
                     painter.drawLine(x, y, grip_rect.right() - 4, y)
 
             painter.drawRoundedRect(self.rect().adjusted(0, 0, 0, 0), 8, 8)
-        super().paintEvent(event)
 
     def _get_max_overlay_width(self) -> int:
         """Get max allowed overlay width based on screen size."""
@@ -140,25 +142,22 @@ class SubtitleOverlay(QWidget):
 
     def _set_label_text(self, line1: str, line2: str):
         """Set text on label widgets."""
-        # Show line1
-        self._labels[0].setText(line1 or "")
-        self._labels[0].setVisible(bool(line1))
+        # Hide all labels first
+        for lbl in self._labels:
+            lbl.setVisible(False)
 
-        if line2 and self._display_mode == "bilingual":
-            self._labels[1].setText(line2)
-            self._labels[1].setVisible(True)
-            self._labels[2].setVisible(False)
-        elif line1 and self._display_mode != "bilingual":
-            # Use second label for empty line if needed
-            self._labels[1].setVisible(False)
-            self._labels[2].setVisible(False)
-        else:
-            # For short bilingual lines, stack both in first two labels
-            if line2 and self._display_mode == "bilingual":
-                self._labels[0].setText(line1)
-                self._labels[1].setText(line2)
-                self._labels[1].setVisible(True)
-            self._labels[2].setVisible(False)
+        if self._display_mode == "original":
+            self._labels[0].setText(line1 or "")
+            self._labels[0].setVisible(bool(line1))
+        elif self._display_mode == "translated":
+            self._labels[0].setText(line2 or "")
+            self._labels[0].setVisible(bool(line2))
+        else:  # bilingual
+            self._labels[0].setText(line1 or "")
+            self._labels[0].setVisible(bool(line1))
+            self._labels[1].setText(line2 or "")
+            self._labels[1].setVisible(bool(line2))
+        # _labels[2] stays hidden (reserved for 3-line display)
 
     def _fade_out(self):
         """Fade out subtitles after timeout."""
