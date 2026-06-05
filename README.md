@@ -126,3 +126,9 @@ live_subtitle/
 - Check `%LOCALAPPDATA%\LiveTranslateOverlay\logs\install.log`
 - Ensure VC++ Redist is installed
 - Run installer as Administrator
+
+# 1. Verify env
+python installer\preinstall_check.py
+
+# 2. Build installer
+installer\build_installer.bat

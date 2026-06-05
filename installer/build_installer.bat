@@ -61,6 +61,10 @@ if exist "%PROJECT_ROOT%\dist\LiveTranslateOverlay" (
     rmdir /s /q "%PROJECT_ROOT%\dist\LiveTranslateOverlay"
     echo   Removed dist/LiveTranslateOverlay/
 )
+REM Delete old installer files from previous builds
+del /q "%PROJECT_ROOT%\dist\LiveTranslateOverlay_Setup_v*.exe" 2>nul
+del /q "%PROJECT_ROOT%\dist\LiveTranslateOverlay_Setup_v*.bin" 2>nul
+echo   Removed old installer artifacts
 echo   Clean complete.
 echo.
 
@@ -115,8 +119,7 @@ echo.
 REM ---- Step 5: Build Inno Setup installer ----
 echo [Step 5/5] Building Inno Setup installer...
 echo [5/5] Inno Setup build >> "%LOG_FILE%"
-cd /d "%PROJECT_ROOT%\installer"
-iscc setup.iss 2>&1 >> "%LOG_FILE%"
+"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "%PROJECT_ROOT%\installer\setup.iss" 2>&1 >> "%LOG_FILE%"
 if %ERRORLEVEL% NEQ 0 (
     echo   ERROR: Inno Setup build FAILED!
     echo   Check log: %LOG_FILE%
@@ -149,8 +152,9 @@ echo.
 echo Build log: %LOG_FILE%
 echo.
 echo To distribute:
-echo   - Share all files matching LiveTranslateOverlay_Setup_v*.*
-echo   - Users run Part1.exe to install (multi-part auto-merges)
+echo   - Zip both: LiveTranslateOverlay_Setup_v*.exe + LiveTranslateOverlay\ folder
+echo   - Users run the .exe to install into Program Files
+echo   - These are already in: %PROJECT_ROOT%\dist\
 echo.
 echo Build finished: %BUILD_END% >> "%LOG_FILE%"
 echo ============================================================ >> "%LOG_FILE%"

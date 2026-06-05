@@ -15,7 +15,7 @@ from pathlib import Path
 
 block_cipher = None
 
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.getcwd()
 MODELS_DIR = os.path.join(PROJECT_ROOT, "models")
 
 # Collect faster-whisper model files (tiny, small, medium)
@@ -26,9 +26,9 @@ if os.path.isdir(MODELS_DIR):
         # Skip .cache directories
         if ".cache" in root or "__pycache__" in root:
             continue
-        # For small100, only bundle ONNX + tokenizer/config, skip safetensors/pytorch_model.bin
+        # For small100, bundle ONNX + safetensors + tokenizer/config, skip only pytorch_model.bin
         if "small100" in root:
-            keep_exts = {".onnx", ".json", ".model", ".py", ".txt", ".gitattributes"}
+            keep_exts = {".onnx", ".safetensors", ".json", ".model", ".py", ".txt", ".gitattributes"}
             for f in files:
                 ext = os.path.splitext(f)[1].lower()
                 if ext not in keep_exts:
@@ -123,22 +123,31 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
     [],
+    exclude_binaries=True,
     name='LiveTranslateOverlay',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,  # No console window
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
     icon=os.path.join(PROJECT_ROOT, 'assets', 'icon.ico') if os.path.exists(os.path.join(PROJECT_ROOT, 'assets', 'icon.ico')) else None,
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=False,
+    upx_exclude=[],
+    name='LiveTranslateOverlay',
 )

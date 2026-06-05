@@ -1,13 +1,13 @@
 ; Inno Setup script for Live Translate Overlay
-; Build with: iscc setup.iss
-; For large bundles, uses disk spanning to stay under 2GB per part
+; External mode — copies files from setup.exe directory at install time.
+; Place this .exe alongside the dist/LiveTranslateOverlay/ folder
+; (or rename dist/ to LiveTranslateOverlay/ for distribution).
 
-#define MyAppName "Live Translate Overlay"
+#define MyAppName "Lotus Translator"
 #define MyAppVersion "1.0.0"
 #define MyAppPublisher "LotusTranslator"
 #define MyAppURL "https://github.com/lotus-translate"
 #define MyAppExeName "LiveTranslateOverlay.exe"
-#define MyAppAssocName MyAppName + " File"
 
 [Setup]
 AppId={{LOTUS-TRANSLATE-2026-A1B2C3D4E5F6}
@@ -23,20 +23,15 @@ AllowNoIcons=yes
 LicenseFile=..\LICENSE
 OutputDir=..\dist
 OutputBaseFilename=LiveTranslateOverlay_Setup_v{#MyAppVersion}
-Compression=lzma2/ultra64
-SolidCompression=yes
-DiskSpanning=yes
-DiskSliceSize=2000000000  ; 2GB per disk
+Compression=none
+SolidCompression=no
+DiskSpanning=no
 WizardStyle=modern
 PrivilegesRequired=admin
 DisableProgramGroupPage=yes
 SetupLogging=yes
 ShowLanguageDialog=no
-
-; Minimum Windows version: Windows 10
 MinVersion=10.0.10240
-
-; Branding images
 SetupIconFile=..\assets\icon.ico
 WizardSmallImageFile=..\assets\logo.jpg
 WizardImageFile=..\assets\thumbnail.jpg
@@ -49,26 +44,12 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional icons:"; Flags: checkedonce
 
 [Files]
-; Main executable
-Source: "..\dist\LiveTranslateOverlay\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+; Copy everything from LiveTranslateOverlay folder beside this setup.exe
+Source: "{src}\LiveTranslateOverlay\*"; DestDir: "{app}"; Flags: external recursesubdirs createallsubdirs uninsremovereadonly
 
-; Configuration files
-Source: "..\config.json"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\languages.json"; DestDir: "{app}"; Flags: ignoreversion
-
-; Model files (all bundled)
-Source: "..\models\*"; DestDir: "{app}\models"; Flags: ignoreversion recursesubdirs createallsubdirs
-
-; All other supporting files from PyInstaller build
-Source: "..\dist\LiveTranslateOverlay\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-
-; Installer helper scripts
-Source: "..\installer\bootstrap_setup.py"; DestDir: "{app}\installer"; Flags: ignoreversion
-Source: "..\installer\preinstall_check.py"; DestDir: "{app}\installer"; Flags: ignoreversion
-Source: "..\installer\cuda_setup.bat"; DestDir: "{app}\installer"; Flags: ignoreversion
-
-; VC++ Redistributable (bundled for offline install)
-Source: "..\installer\vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: ignoreversion deleteafterinstall; Check: Not VCInstalled
+; Grant write permission so app can update models/cache at runtime
+[Dirs]
+Name: "{app}"; Permissions: users-modify
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
@@ -76,8 +57,8 @@ Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
-; Install VC++ Redist if needed (before app launch)
-Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "Installing Visual C++ Redistributable..."; Flags: skipifdoesntexist; Check: Not VCInstalled
+; Grant Users full mod on entire app dir (recursive) — models/cache need writes
+Filename: "{sys}\icacls.exe"; Parameters: """{app}"" /grant ""Users:(OI)(CI)M"" /T /Q"; Flags: runhidden waituntilterminated; StatusMsg: "Setting permissions..."
 ; Launch app after install
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: postinstall nowait skipifsilent shellexec
 
@@ -87,18 +68,6 @@ Filename: "taskkill"; Parameters: "/f /im {#MyAppExeName}"; Flags: runhidden
 [Code]
 var
   LogFile: string;
-
-function Not VCInstalled: Boolean;
-var
-  Success: Boolean;
-  Msg: String;
-begin
-  // Check if VC++ 2015-2022 Redist is installed
-  Success := RegKeyExists(HKLM, 'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64');
-  if not Success then
-    Success := RegKeyExists(HKLM, 'SOFTWARE\WOW6432Node\Microsoft\VisualStudio\14.0\VC\Runtimes\x64');
-  Result := not Success;
-end;
 
 procedure InitializeWizard;
 begin
@@ -113,7 +82,6 @@ begin
   if CurStep = ssPostInstall then
   begin
     CreateDir(ExpandConstant('{app}\logs'));
-    CreateDir(ExpandConstant('{app}\installer'));
     Log('Installation completed successfully');
   end;
 end;

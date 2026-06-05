@@ -24,9 +24,12 @@ from transformers import M2M100ForConditionalGeneration
 logger = logging.getLogger(__name__)
 
 MODEL_REPO = "alirezamsh/small100"
-DEFAULT_MODEL_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(__file__)), "models", "small100"
-)
+if getattr(sys, 'frozen', False):
+    DEFAULT_MODEL_DIR = os.path.join(os.path.dirname(sys.executable), "_internal", "models", "small100")
+else:
+    DEFAULT_MODEL_DIR = os.path.join(
+        os.path.dirname(os.path.dirname(__file__)), "models", "small100"
+    )
 
 
 class Small100Engine:
@@ -44,7 +47,7 @@ class Small100Engine:
     def _maybe_download(self):
         """Download model from HF hub if not already on disk."""
         if os.path.isdir(self._model_dir) and any(
-            f.endswith(".bin") or f.endswith(".safetensors")
+            f.endswith(".bin") or f.endswith(".safetensors") or f.endswith(".onnx")
             for f in os.listdir(self._model_dir)
         ):
             logger.info("Small100 model already cached at %s", self._model_dir)
