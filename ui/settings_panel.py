@@ -173,7 +173,10 @@ class SettingsPanel(QWidget):
         self._update_model_download_status()
 
         model_layout.addWidget(QLabel(
-            "Note: Larger models are more accurate but slower and use more RAM."
+            "Note: Larger models are more accurate but slower and use more RAM"
+        ))
+        model_layout.addWidget(QLabel(
+            "Note: Choose tiny if you dont have a vga."
         ))
 
         layout.addWidget(model_group)
@@ -204,6 +207,7 @@ class SettingsPanel(QWidget):
         self._translation_status = QLabel("Translation: Not ready (checking engines...)")
         self._translation_status.setMinimumHeight(35)
         trans_layout.addWidget(self._translation_status)
+        trans_layout.addWidget(QLabel("Note: Choose Argos if you dont have a vga"))
 
         layout.addWidget(trans_group)
 

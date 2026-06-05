@@ -63,22 +63,12 @@ class SettingsManager:
     def check_expiry(self) -> bool:
         """Check if app is expired. Returns True if still valid."""
         expiry_str = self._settings.get("expiry_date", "")
-        # Debug: force print to original stdout so user can see
-        try:
-            import sys
-            sys.stdout.write(f"[DEBUG] check_expiry: expiry_str={expiry_str!r}\n")
-            sys.stdout.flush()
-        except Exception:
-            pass
         if not expiry_str:
             return True  # No expiry set → free to use
         try:
             exp_date = datetime.strptime(expiry_str, "%Y-%m-%d").date()
             today = date.today()
             if today >= exp_date:
-                import sys
-                sys.stdout.write(f"[DEBUG] EXPIRED! today={today} >= exp_date={exp_date}\n")
-                sys.stdout.flush()
                 logger.warning("App expired on %s", expiry_str)
                 return False
         except ValueError:

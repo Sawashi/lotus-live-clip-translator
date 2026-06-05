@@ -7,6 +7,11 @@ as a floating overlay.
 
 import os
 import sys
+import io
+import logging
+import json
+from pathlib import Path
+from logging.handlers import RotatingFileHandler
 
 # Point to cuDNN 9 DLLs
 def _add_cudnn_path():
@@ -26,19 +31,50 @@ def _add_cudnn_path():
 
 _add_cudnn_path()
 
-import io
-import logging
-from logging.handlers import RotatingFileHandler
-
 # Redirect stdout to suppress argostranslate print() spam BEFORE any imports
 _original_stdout = sys.stdout
 sys.stdout = io.StringIO()
 
-from PyQt6.QtWidgets import QApplication, QMessageBox
+from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt
 
 from ui.main_window import MainWindow
 from settings.settings_manager import SettingsManager
+
+# Bootstrap marker path
+BOOTSTRAP_MARKER = os.path.join(
+    os.environ.get("LOCALAPPDATA", os.path.expanduser("~")),
+    "LiveTranslateOverlay",
+    ".bootstrap_needed"
+)
+
+
+def run_bootstrap(logger):
+    """Run first-time environment bootstrap if needed."""
+    marker = Path(BOOTSTRAP_MARKER)
+    if not marker.exists():
+        logger.info("Bootstrap marker not found — checking previous status")
+        status_file = marker.parent / "logs" / "bootstrap_status.json"
+        if status_file.exists():
+            logger.info("Bootstrap previously completed (status file exists)")
+            return True
+
+    logger.info("Running first-time environment bootstrap...")
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from installer.bootstrap_setup import run_bootstrap
+        status = run_bootstrap()
+        if status.get("packages_ok", False):
+            logger.info("Bootstrap completed successfully")
+        else:
+            logger.warning("Bootstrap completed with warnings — see log")
+
+        if marker.exists():
+            marker.unlink()
+        return True
+    except Exception as e:
+        logger.error("Bootstrap error: %s", e)
+        return False
 
 
 def setup_logging():
@@ -104,21 +140,13 @@ def main():
     logger = setup_logging()
     logger.info("=== Lotus Translator starting ===")
 
+    # Run first-time bootstrap
+    run_bootstrap(logger)
+
     # Create QApp early so QMessageBox works
     app = QApplication(sys.argv)
     app.setApplicationName("Lotus Translator")
     app.setOrganizationName("LotusTranslator")
-
-    # Check expiry before launching main UI
-    settings_mgr = SettingsManager()
-    if not settings_mgr.check_expiry():
-        expiry = settings_mgr.get("expiry_date", "unknown")
-        QMessageBox.critical(
-            None, "Lotus Translator - Expired",
-            f"This application has expired ({expiry}).\n\n"
-            "Please contact the developer for a new version."
-        )
-        sys.exit(1)
 
     # Enable high DPI scaling
     app.setHighDpiScaleFactorRoundingPolicy(

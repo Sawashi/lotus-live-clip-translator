@@ -380,14 +380,50 @@ class MainWindow(QMainWindow):
 
     def _show_about(self):
         """Show about dialog."""
-        QMessageBox.about(
-            self, "About Lotus Translator",
-            "Lotus Translator v1.0.0\n\n"
-            "Real-time speech recognition and translation overlay.\n\n"
-            "Captures system audio via WASAPI Loopback.\n"
-            "Powered by faster-whisper, Argos Translate, and Small100.\n\n"
-            "Credit by Sawashi - Kiet Le"
+        import os
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton
+        from PyQt6.QtGui import QPixmap
+        from PyQt6.QtCore import Qt
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("About Lotus Translator")
+        dlg.setFixedSize(420, 400)
+
+        layout = QVBoxLayout(dlg)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        # Logo
+        logo_path = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)), "assets", "logo.jpg"
         )
+        if os.path.exists(logo_path):
+            pix = QPixmap(logo_path)
+            logo = QLabel()
+            logo.setPixmap(pix.scaled(360, 180, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+            logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(logo)
+
+        # Text
+        text = QLabel(
+            "<h3>Lotus Translator v1.0.0</h3>"
+            "Real-time speech recognition & translation overlay.<br><br>"
+            "Captures system audio via WASAPI Loopback.<br>"
+            "Powered by faster-whisper, Argos Translate, and Small100.<br><br>"
+            "<i>Credit by Sawashi - Kiet Le</i>"
+        )
+        text.setWordWrap(True)
+        text.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        text.setOpenExternalLinks(True)
+        layout.addWidget(text)
+
+        layout.addSpacing(10)
+
+        close_btn = QPushButton("Close")
+        close_btn.setFixedWidth(100)
+        close_btn.clicked.connect(dlg.accept)
+        layout.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        dlg.exec()
 
     # ---- Event Overrides ----
 
