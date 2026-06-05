@@ -168,6 +168,7 @@ class MainWindow(QMainWindow):
 
         if self._translation_worker:
             self._translation_worker.set_enabled(settings["translation_enabled"])
+            self._translation_worker.set_engine(settings.get("translation_engine", "argos"))
             self._translation_worker.set_languages(
                 settings["source_language"],
                 settings["target_language"],

@@ -136,12 +136,17 @@ class TranslationWorker(threading.Thread):
         if self._current_engine is not None:
             return self._current_engine
 
-        if self._engine_type == ENGINE_SMALL100:
-            if self._small100 is None:
-                from translation.small100_engine import Small100Engine
-                self._small100 = Small100Engine()
-            self._current_engine = self._small100
-        else:
+        try:
+            if self._engine_type == ENGINE_SMALL100:
+                if self._small100 is None:
+                    from translation.small100_engine import Small100Engine
+                    self._small100 = Small100Engine()
+                self._current_engine = self._small100
+            else:
+                self._current_engine = self._argos
+        except Exception as e:
+            logger.error("Failed to initialize %s engine: %s", self._engine_type, e)
+            # Set to argos as fallback to avoid infinite retry
             self._current_engine = self._argos
 
         return self._current_engine

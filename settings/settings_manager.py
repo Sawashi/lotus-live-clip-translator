@@ -18,7 +18,7 @@ DEFAULT_SETTINGS = {
     "target_language": "en",
     "translation_enabled": True,
     "translation_mode": "offline",
-    "translation_engine": "argos",
+    "translation_engine": "small100",
     "display_mode": "bilingual",
     "whisper_model": "small",
     "font_size": 24,
