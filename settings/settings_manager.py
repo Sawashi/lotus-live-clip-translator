@@ -23,7 +23,7 @@ DEFAULT_SETTINGS = {
     "whisper_model": "small",
     "font_size": 24,
     "font_color": "#FFFFFF",
-    "overlay_opacity": 0.7,
+    "overlay_opacity": 0.2,
     "line_spacing": 1.2,
     "overlay_x": 100,
     "overlay_y": 100,

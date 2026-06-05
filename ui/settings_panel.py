@@ -420,7 +420,7 @@ class SettingsPanel(QWidget):
     def _reset_settings(self):
         """Reset to default settings."""
         self._font_slider.setValue(24)
-        self._opacity_slider.setValue(70)
+        self._opacity_slider.setValue(20)
         self._spacing_slider.setValue(12)
         self._buffer_slider.setValue(19)
         self._buffer_label.setText("1.9s")
@@ -430,7 +430,7 @@ class SettingsPanel(QWidget):
         self._model_selector.setCurrentIndex(1)
         self._theme_selector.setCurrentText("Dark")
         self._translation_toggle.setChecked(True)
-        self._engine_selector.setCurrentIndex(0)  # Argos (default)
+        self._engine_selector.setCurrentIndex(1)  # Argos (default)
         self._selected_color = "#FFFFFF"
         self._emit_change()
         # Reposition overlay to screen center and reset size
