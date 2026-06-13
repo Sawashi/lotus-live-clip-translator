@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+*.egg
+*.whl
+*.so
+*.pyd
+
+# Build
+build/
+*.spec
+
+# Virtual environment
+venv/
+.venv/
+env/
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+# Installer output
+installer/*.exe
+installer/*.log
+
+# Logs
+logs/
+*.log
+
+# Config with user data
+config.json
+
+# Models (large binaries)
+models/models--Systran--faster-whisper-*/
+models/argos_packages/
+
+# Redundant model weight files (only pytorch_model.bin needed)
+models/small100/model.onnx
+models/small100/model.safetensors
+models/small100/.cache/
+models/small100/__pycache__/
+models/.locks/
+.venv/  

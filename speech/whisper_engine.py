@@ -5,13 +5,24 @@ with support for CPU and CUDA (auto-detected).
 """
 
 import os
+import sys
 import logging
 import numpy as np
 from faster_whisper import WhisperModel
 
 logger = logging.getLogger(__name__)
 
-MODEL_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models")
+if getattr(sys, 'frozen', False):
+    MODEL_DIR = os.path.join(os.path.dirname(sys.executable), "_internal", "models")
+else:
+    MODEL_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models")
+
+# Map model size names to actual HuggingFace cache-style directory names
+WHISPER_MODEL_DIR_MAP = {
+    "tiny": "models--Systran--faster-whisper-tiny",
+    "small": "models--Systran--faster-whisper-small",
+    "medium": "models--Systran--faster-whisper-medium",
+}
 
 # Hallucination detection thresholds
 NO_SPEECH_THRESHOLD = 0.8  # Only filter if model is very confident it's silence
@@ -68,10 +79,21 @@ class WhisperEngine:
                 self._model_size, self._device, self._compute_type
             )
 
-            model_path = os.path.join(MODEL_DIR, self._model_size)
+            # Use mapped directory name if known, fall back to model_size directly
+            model_dir_name = WHISPER_MODEL_DIR_MAP.get(self._model_size, self._model_size)
+            model_path = os.path.join(MODEL_DIR, model_dir_name)
             if not os.path.exists(model_path):
                 logger.info("Model not found locally at %s, will download", model_path)
                 model_path = self._model_size
+            else:
+                # HF cache layout: models--repo--name/snapshots/<hash>/
+                # faster-whisper needs the snapshot subdir with model.bin directly inside
+                snapshots_dir = os.path.join(model_path, "snapshots")
+                if os.path.isdir(snapshots_dir):
+                    snapshots = os.listdir(snapshots_dir)
+                    if snapshots:
+                        model_path = os.path.join(snapshots_dir, snapshots[0])
+                        logger.info("Using HF cache snapshot path: %s", model_path)
 
             self._model = WhisperModel(
                 model_path,
@@ -171,34 +193,53 @@ class WhisperEngine:
                 beam_size=5,
                 vad_filter=False,
             )
-
-            results = []
-            filtered = 0
-            for seg in segments:
-                if self._is_hallucination(seg):
-                    filtered += 1
-                    continue
-
-                text = seg.text.strip()
-                results.append({
-                    "text": text,
-                    "start": seg.start,
-                    "end": seg.end
-                })
-
-            logger.debug(
-                "Transcribed %.2f sec audio: %d results (%d filtered), language=%s prob=%.2f",
-                len(audio_data) / 16000,
-                len(results),
-                filtered,
-                info.language,
-                info.language_probability
-            )
-            return results
-
         except Exception as e:
-            logger.error("Transcription error: %s", e)
-            return []
+            # Frozen build CUDA error — reload on CPU and retry once
+            if getattr(sys, 'frozen', False) and self._device == "cuda":
+                logger.error("CUDA transcribe failed: %s — retrying on CPU", e)
+                self.unload()
+                self._device = "cpu"
+                self._compute_type = "int8"
+                self.load_model()
+                if not self._loaded:
+                    return []
+                try:
+                    segments, info = self._model.transcribe(
+                        audio_data,
+                        language=language if language != "auto" else None,
+                        beam_size=5,
+                        vad_filter=False,
+                    )
+                except Exception as e2:
+                    logger.error("CPU fallback also failed: %s", e2)
+                    return []
+            else:
+                logger.error("Transcription error: %s", e)
+                return []
+
+        results = []
+        filtered = 0
+        for seg in segments:
+            if self._is_hallucination(seg):
+                filtered += 1
+                continue
+
+            text = seg.text.strip()
+            results.append({
+                "text": text,
+                "start": seg.start,
+                "end": seg.end
+            })
+
+        logger.debug(
+            "Transcribed %.2f sec audio: %d results (%d filtered), language=%s prob=%.2f",
+            len(audio_data) / 16000,
+            len(results),
+            filtered,
+            info.language,
+            info.language_probability
+        )
+        return results
 
     def unload(self):
         """Unload the model to free memory."""

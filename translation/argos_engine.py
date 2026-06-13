@@ -112,6 +112,28 @@ class ArgosEngine:
             logger.error("Argos translate error: %s", e)
             return ""
 
+    def translate_via_english(self, text: str, from_code: str, to_code: str) -> str:
+        """2-hop translate: from_code → en → to_code.
+
+        Used when direct from→to pair doesn't exist but both
+        from→en and en→to are available.
+        """
+        if not text or not text.strip():
+            return ""
+
+        # Hop 1: from_code → en
+        en_text = self.translate(text, from_code, "en")
+        if not en_text:
+            logger.warning("Hop 1 failed: %s → en", from_code)
+            return ""
+
+        # Hop 2: en → to_code
+        result = self.translate(en_text, "en", to_code)
+        if not result:
+            logger.warning("Hop 2 failed: en → %s", to_code)
+            return ""
+        return result
+
     def get_installed_languages(self) -> list:
         """Get list of installed language codes."""
         return list(set(

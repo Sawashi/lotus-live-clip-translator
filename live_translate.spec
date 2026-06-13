@@ -4,8 +4,9 @@ PyInstaller spec for Live Translate Overlay.
 
 Builds a single Windows executable with:
 - All Python dependencies bundled
-- faster-whisper small model included
-- Languages config included
+- faster-whisper models (tiny/small/medium) included
+- small100 ONNX model (only pytorch_model.bin, no safetensors/onnx dups)
+- Configuration files included
 """
 
 import sys
@@ -14,29 +15,91 @@ from pathlib import Path
 
 block_cipher = None
 
-# Paths
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.getcwd()
 MODELS_DIR = os.path.join(PROJECT_ROOT, "models")
 
-# Collect faster-whisper model files
-# The small model is ~500MB, bundled in installer
-# For development, we download on first run
+# Collect faster-whisper model files (tiny, small, medium)
+# Exclude .cache junk, __pycache__, .locks, empty blobs dirs
 model_data = []
 if os.path.isdir(MODELS_DIR):
     for root, dirs, files in os.walk(MODELS_DIR):
+        # Skip junk dirs
+        dirname = os.path.basename(root)
+        if dirname in (".cache", "__pycache__", ".locks", "blobs"):
+            dirs[:] = []  # Don't descend
+            continue
+        if ".cache" in root or "__pycache__" in root:
+            continue
+        # For small100, bundle ONLY pytorch_model.bin + tokenizer/config
+        # Skip model.onnx (1.86GB) and model.safetensors (1.33GB) — both redundant
+        if "small100" in root:
+            keep_exts = {".bin", ".json", ".model", ".py", ".txt", ".gitattributes"}
+            for f in files:
+                ext = os.path.splitext(f)[1].lower()
+                if ext not in keep_exts:
+                    continue
+                src = os.path.join(root, f)
+                dst = os.path.relpath(root, PROJECT_ROOT)
+                model_data.append((src, dst))
+            # Skip .cache dirs inside small100
+            for d in list(dirs):
+                if d in (".cache", "__pycache__"):
+                    dirs.remove(d)
+        else:
+            for f in files:
+                src = os.path.join(root, f)
+                dst = os.path.relpath(root, PROJECT_ROOT)
+                model_data.append((src, dst))
+
+# Collect argos packages if any
+argos_data = []
+argos_dir = os.path.join(MODELS_DIR, "argos_packages")
+if os.path.isdir(argos_dir):
+    for root, dirs, files in os.walk(argos_dir):
         for f in files:
             src = os.path.join(root, f)
             dst = os.path.relpath(root, PROJECT_ROOT)
-            model_data.append((src, dst))
+            argos_data.append((src, dst))
+
+# PyInstaller hook to collect all nvidia CUDA runtime DLLs
+# Required for ctranslate2/faster-whisper CUDA support in frozen builds
+def _collect_nvidia_binaries():
+    """Find and return nvidia CUDA DLLs from site-packages."""
+    import site, glob
+    binaries = []
+    # Common patterns for nvidia pip wheels
+    patterns = [
+        "nvidia/cublas/**/*.dll",
+        "nvidia/cublas/**/*.pyd",
+        "nvidia/cudnn/**/*.dll",
+        "nvidia/cudnn/**/*.pyd",
+        "nvidia/cuda_runtime/**/*.dll",
+        "nvidia/cuda_runtime/**/*.pyd",
+        "nvidia/cuda_nvrtc/**/*.dll",
+        "nvidia/cuda_nvrtc/**/*.pyd",
+        "ctranslate2/**/*.pyd",
+        "ctranslate2/**/*.dll",
+    ]
+    for sp in site.getsitepackages()[-1:]:
+        for pat in patterns:
+            full_pat = os.path.join(sp, pat)
+            for fp in glob.glob(full_pat, recursive=True):
+                if os.path.isfile(fp):
+                    binaries.append((fp, "."))
+    return binaries
+
 
 a = Analysis(
     ['main.py'],
     pathex=[PROJECT_ROOT],
-    binaries=[],
+    binaries=_collect_nvidia_binaries(),
     datas=[
         ('config.json', '.'),
         ('languages.json', '.'),
-    ] + model_data,
+        ('assets', 'assets'),
+        (os.path.join(PROJECT_ROOT, 'installer', 'bootstrap_setup.py'), 'installer'),
+        (os.path.join(PROJECT_ROOT, 'installer', 'preinstall_check.py'), 'installer'),
+    ] + model_data + argos_data,
     hiddenimports=[
         'PyQt6',
         'PyQt6.QtCore',
@@ -62,10 +125,31 @@ a = Analysis(
         'comtypes',
         'numpy',
         'requests',
+        'transformers',
+        'transformers.models.m2m_100',
+        'transformers.models.m2m_100.modeling_m2m_100',
+        'transformers.generation',
+        'sentencepiece',
+        'accelerate',
+        'accelerate.utils',
+        'huggingface_hub',
+        'huggingface_hub.snapshot_download',
+        'tokenization_small100',
+        # ctranslate2 CUDA support — required for frozen builds
+        'ctranslate2',
+        'ctranslate2.cuda',
+        'ctranslate2.cuda.cuda',
+        'nvidia.cublas',
+        'nvidia.cublas.lib',
+        'nvidia.cublas.lib.nvblas64',
+        'nvidia.cudnn',
+        'nvidia.cuda_runtime',
+        'nvidia.cuda_runtime.lib',
+        'nvidia.cuda_nvrtc',
     ],
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=[os.path.join(PROJECT_ROOT, 'speech', 'whisper_cuda_hook.py')],
     excludes=[
         'tkinter',
         'matplotlib',
@@ -73,8 +157,8 @@ a = Analysis(
         'pandas',
         'PIL',
         'cv2',
-        'torchvision',
-        'torchaudio',
+        'tensorflow',
+        'tensorboard',
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
@@ -87,22 +171,31 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
     [],
+    exclude_binaries=True,
     name='LiveTranslateOverlay',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,  # No console window
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
     icon=os.path.join(PROJECT_ROOT, 'assets', 'icon.ico') if os.path.exists(os.path.join(PROJECT_ROOT, 'assets', 'icon.ico')) else None,
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=False,
+    upx_exclude=[],
+    name='LiveTranslateOverlay',
 )

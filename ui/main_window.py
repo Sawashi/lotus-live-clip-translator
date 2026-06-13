@@ -43,12 +43,13 @@ class MainWindow(QMainWindow):
         self._capture_worker = None
         self._recognition_worker = None
         self._translation_worker = None
+        self._current_engine = "argos"
 
         # UI
         self._overlay = None
         self._settings_panel = None
 
-        # Debounce timer for settings save (avoids writing JSON on every slider tick)
+        # Debounce timer for settings save
         self._save_debounce = QTimer(self)
         self._save_debounce.setSingleShot(True)
         self._save_debounce.timeout.connect(self._save_settings)
@@ -62,7 +63,7 @@ class MainWindow(QMainWindow):
 
     def _init_ui(self):
         """Initialize the main window UI."""
-        self.setWindowTitle("Live Translate Overlay")
+        self.setWindowTitle("Lotus Translator")
         self.setMinimumSize(480, 700)
         self.resize(520, 800)
 
@@ -117,10 +118,9 @@ class MainWindow(QMainWindow):
 
     def _init_timers(self):
         """Set up polling timers."""
-        # Poll subtitle queue from the main thread
         self._subtitle_timer = QTimer(self)
         self._subtitle_timer.timeout.connect(self._process_subtitle_queue)
-        self._subtitle_timer.start(100)  # 100ms polling
+        self._subtitle_timer.start(100)
 
     # ---- Settings ----
 
@@ -129,45 +129,34 @@ class MainWindow(QMainWindow):
         self._settings_manager.load()
         settings = self._settings_manager.get_all()
 
-        # Apply to UI panel
         self._settings_panel.apply_settings(settings)
-
-        # Apply to overlay
         self._overlay.apply_settings(settings)
 
-        # Apply theme
         theme = settings.get("theme", "dark")
         self._apply_theme(theme)
 
     def _save_settings(self):
         """Save current settings."""
         settings = self._settings_panel.get_settings()
-
-        # Include overlay position/size
         pos = self._overlay.save_position()
         settings.update(pos)
-
         self._settings_manager.set_multiple(settings)
 
     def _on_settings_changed(self):
         """Handle settings panel changes."""
         settings = self._settings_panel.get_settings()
 
-        # Update overlay immediately
         self._overlay.set_font_size(settings["font_size"])
         self._overlay.set_font_color(settings["font_color"])
         self._overlay.set_bg_opacity(settings["overlay_opacity"])
         self._overlay.set_line_spacing(settings["line_spacing"])
         self._overlay.set_display_mode(settings["display_mode"])
 
-        # Update theme
         self._apply_theme(settings["theme"])
 
-        # Update workers if running
         if self._capturing:
             self._update_worker_settings(settings)
 
-        # Auto-save with debounce (300ms) — avoids writing JSON on every slider tick
         self._save_debounce.start(300)
 
     def _update_worker_settings(self, settings: dict):
@@ -175,14 +164,15 @@ class MainWindow(QMainWindow):
         if self._recognition_worker:
             self._recognition_worker.set_language(settings["source_language"])
             self._recognition_worker.set_model(settings["whisper_model"])
-            self._recognition_worker.set_buffer_duration(settings.get("buffer_duration", 2.0))
+            self._recognition_worker.set_buffer_duration(settings.get("buffer_duration", 1.9))
 
         if self._translation_worker:
             self._translation_worker.set_enabled(settings["translation_enabled"])
-            self._translation_worker.set_mode(settings["translation_mode"])
+            self._translation_worker.set_engine(settings.get("translation_engine", "argos"))
             self._translation_worker.set_languages(
                 settings["source_language"],
-                settings["target_language"]
+                settings["target_language"],
+                settings.get("target_mode", "direct")
             )
 
     def _apply_theme(self, theme: str):
@@ -239,43 +229,35 @@ class MainWindow(QMainWindow):
         settings = self._settings_panel.get_settings()
 
         try:
-            # Create and start workers (thread-safe queues)
             self._capture_worker = CaptureWorker(self._audio_queue)
-            chunk_duration = settings.get("buffer_duration", 2.0)
+            chunk_duration = settings.get("buffer_duration", 1.9)
             self._recognition_worker = RecognitionWorker(
                 self._audio_queue, self._text_queue,
                 model_size=settings["whisper_model"],
                 chunk_duration=chunk_duration
             )
+            engine = settings.get("translation_engine", "argos")
+            self._current_engine = engine
             self._translation_worker = TranslationWorker(
-                self._text_queue, self._subtitle_queue
+                self._text_queue, self._subtitle_queue, engine_type=engine
             )
 
-            # Configure workers
             self._recognition_worker.set_language(settings["source_language"])
             self._translation_worker.set_enabled(settings["translation_enabled"])
-            self._translation_worker.set_mode(settings["translation_mode"])
             self._translation_worker.set_languages(
                 settings["source_language"],
-                settings["target_language"]
+                settings["target_language"],
+                settings.get("target_mode", "direct")
             )
 
-            # Start workers
             self._capture_worker.start()
             self._recognition_worker.start()
             self._translation_worker.start()
 
             self._capturing = True
-
-            # Update UI
             self._settings_panel.set_capturing(True)
-            # Device name may not be available yet (thread hasn't run)
             QTimer.singleShot(500, self._update_device_status)
-
-            # Poll model status
             QTimer.singleShot(2000, self._check_model_status)
-
-            # Poll translation engine status
             QTimer.singleShot(1000, self._check_translation_status)
 
             logger.info("Capture started")
@@ -292,7 +274,6 @@ class MainWindow(QMainWindow):
         """Stop the audio capture pipeline."""
         self._capturing = False
 
-        # Stop workers
         if self._capture_worker:
             self._capture_worker.stop()
         if self._recognition_worker:
@@ -304,16 +285,12 @@ class MainWindow(QMainWindow):
         self._recognition_worker = None
         self._translation_worker = None
 
-        # Clear queues
         self._clear_queue(self._audio_queue)
         self._clear_queue(self._text_queue)
         self._clear_queue(self._subtitle_queue)
 
-        # Update UI
         self._settings_panel.set_capturing(False)
         self._settings_panel.set_device_status("Stopped")
-
-        # Clear overlay
         self._overlay.clear()
 
         logger.info("Capture stopped")
@@ -342,8 +319,8 @@ class MainWindow(QMainWindow):
             self._settings_panel.set_translation_status(
                 self._translation_worker.status_detail
             )
-            # Keep polling while engines are being checked
-            if not self._translation_worker._engines_checked:
+            # Keep polling until status stabilizes (not_ready changes to offline)
+            if self._translation_worker.status == "not_ready":
                 QTimer.singleShot(2000, self._check_translation_status)
 
     @staticmethod
@@ -358,27 +335,21 @@ class MainWindow(QMainWindow):
     # ---- Subtitle Processing ----
 
     def _process_subtitle_queue(self):
-        """Process incoming subtitle data from the translation worker.
-
-        Drains the queue but only applies the LAST item to avoid
-        showing stale intermediate results.
-        """
+        """Process incoming subtitle data from the translation worker."""
         last_msg = None
         try:
             while True:
                 msg = self._subtitle_queue.get_nowait()
-                last_msg = msg  # Keep overwriting — only the last one matters
+                last_msg = msg
         except queue.Empty:
             pass
 
         if last_msg is not None:
-            # Handle reset signal: clear overlay display
             if last_msg.get("type") == "reset":
                 self._overlay.clear()
             else:
                 self._overlay.set_subtitles(last_msg["original"], last_msg["translated"])
 
-        # Update translation status if worker is running
         if self._translation_worker:
             self._settings_panel.set_translation_status(
                 self._translation_worker.status_detail
@@ -409,14 +380,50 @@ class MainWindow(QMainWindow):
 
     def _show_about(self):
         """Show about dialog."""
-        QMessageBox.about(
-            self, "About Live Translate Overlay",
-            "Live Translate Overlay v1.0.0\n\n"
-            "Real-time speech recognition and translation overlay.\n\n"
-            "Captures system audio via WASAPI Loopback.\n"
-            "Powered by faster-whisper, Argos Translate, and LibreTranslate.\n\n"
-            "Free and open source. No API keys required."
+        import os
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton
+        from PyQt6.QtGui import QPixmap
+        from PyQt6.QtCore import Qt
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("About Lotus Translator")
+        dlg.setFixedSize(420, 400)
+
+        layout = QVBoxLayout(dlg)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        # Logo
+        logo_path = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)), "assets", "logo.jpg"
         )
+        if os.path.exists(logo_path):
+            pix = QPixmap(logo_path)
+            logo = QLabel()
+            logo.setPixmap(pix.scaled(360, 180, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+            logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(logo)
+
+        # Text
+        text = QLabel(
+            "<h3>Lotus Translator v1.0.0</h3>"
+            "Real-time speech recognition & translation overlay.<br><br>"
+            "Captures system audio via WASAPI Loopback.<br>"
+            "Powered by faster-whisper, Argos Translate, and Small100.<br><br>"
+            "<i>Credit by Sawashi - Kiet Le</i>"
+        )
+        text.setWordWrap(True)
+        text.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        text.setOpenExternalLinks(True)
+        layout.addWidget(text)
+
+        layout.addSpacing(10)
+
+        close_btn = QPushButton("Close")
+        close_btn.setFixedWidth(100)
+        close_btn.clicked.connect(dlg.accept)
+        layout.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        dlg.exec()
 
     # ---- Event Overrides ----
 

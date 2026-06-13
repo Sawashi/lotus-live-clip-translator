@@ -9,7 +9,7 @@ import logging
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QComboBox, QSlider, QCheckBox, QGroupBox, QGridLayout,
-    QColorDialog, QFileDialog
+    QColorDialog
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QWheelEvent
@@ -23,11 +23,11 @@ MODEL_OPTIONS = [
     ("medium", "Medium – slower, more accurate")
 ]
 
-# Layout constants — consistent spacing throughout
-GROUP_MARGINS = 10       # internal padding inside group boxes
-GROUP_SPACING = 8        # spacing between widgets inside a group
-SECTION_SPACING = 12     # spacing between group boxes
-SLIDER_VALUE_WIDTH = 44  # fixed width for the slider value label
+# Layout constants
+GROUP_MARGINS = 10
+GROUP_SPACING = 8
+SECTION_SPACING = 12
+SLIDER_VALUE_WIDTH = 44
 
 
 def load_languages() -> dict:
@@ -37,17 +37,17 @@ def load_languages() -> dict:
             return json.load(f)
     except Exception as e:
         logger.error("Failed to load languages: %s", e)
-        return {"whisper_languages": [], "translation_pairs": []}
+        return {"whisper_languages": []}
 
 
 class WheelIgnoringSlider(QSlider):
-    """Slider that ignores mouse wheel to prevent accidental changes while scrolling."""
+    """Slider that ignores mouse wheel."""
     def wheelEvent(self, event: QWheelEvent):
         event.ignore()
 
 
 class WheelIgnoringComboBox(QComboBox):
-    """ComboBox that ignores mouse wheel to prevent accidental changes while scrolling."""
+    """ComboBox that ignores mouse wheel."""
     def wheelEvent(self, event: QWheelEvent):
         event.ignore()
 
@@ -56,13 +56,16 @@ class SettingsPanel(QWidget):
     """Configurable settings for translation and overlay."""
 
     settings_changed = pyqtSignal()
-    capture_toggled = pyqtSignal(bool)  # True = start, False = stop
+    capture_toggled = pyqtSignal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._lang_data = load_languages()
+        self._argos_pairs = self._lang_data.get("argos_pairs", {})
+        self._small100_pairs = self._lang_data.get("small100_pairs", {})
         self._selected_color = "#FFFFFF"
         self._capturing = False
+        self._engine = "small100"  # default
         self._init_ui()
 
     def _init_ui(self):
@@ -95,11 +98,11 @@ class SettingsPanel(QWidget):
         buf_row.setSpacing(6)
         buf_row.addWidget(QLabel("Buffer:"))
         self._buffer_slider = WheelIgnoringSlider(Qt.Orientation.Horizontal)
-        self._buffer_slider.setRange(5, 50)  # 0.5s to 5.0s (x10)
-        self._buffer_slider.setValue(20)     # default 2.0s
+        self._buffer_slider.setRange(5, 50)
+        self._buffer_slider.setValue(19)
         self._buffer_slider.valueChanged.connect(self._emit_change)
         buf_row.addWidget(self._buffer_slider, 1)
-        self._buffer_label = QLabel("2.0s")
+        self._buffer_label = QLabel("1.9s")
         self._buffer_label.setFixedWidth(36)
         self._buffer_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._buffer_slider.valueChanged.connect(
@@ -108,6 +111,11 @@ class SettingsPanel(QWidget):
         buf_row.addWidget(self._buffer_label)
         audio_layout.addLayout(buf_row)
 
+        buf_note = QLabel("Lower buffer if speaking slow, increase if fast.\nGood range: 1.5s – 2.0s")
+        buf_note.setStyleSheet("color: #888; font-size: 10px; font-style: italic;")
+        buf_note.setWordWrap(True)
+        audio_layout.addWidget(buf_note)
+
         layout.addWidget(audio_group)
 
         # --- Language Selection ---
@@ -115,25 +123,63 @@ class SettingsPanel(QWidget):
         lang_layout = QGridLayout(lang_group)
         lang_layout.setContentsMargins(GROUP_MARGINS, GROUP_MARGINS, GROUP_MARGINS, GROUP_MARGINS)
         lang_layout.setSpacing(GROUP_SPACING)
-        lang_layout.setColumnStretch(0, 0)   # label column — minimum
-        lang_layout.setColumnStretch(1, 1)   # combo column — stretches
+        lang_layout.setColumnStretch(0, 0)
+        lang_layout.setColumnStretch(1, 1)
 
         lang_layout.addWidget(QLabel("Source:"), 0, 0)
         self._source_lang = WheelIgnoringComboBox()
         self._source_lang.setMinimumWidth(160)
-        self._populate_languages(self._source_lang, include_auto=True)
-        self._source_lang.currentIndexChanged.connect(self._emit_change)
+        self._populate_languages(self._source_lang, include_auto=False)
+        self._source_lang.currentIndexChanged.connect(self._on_source_lang_changed)
         lang_layout.addWidget(self._source_lang, 0, 1)
 
         lang_layout.addWidget(QLabel("Target:"), 1, 0)
         self._target_lang = WheelIgnoringComboBox()
         self._target_lang.setMinimumWidth(160)
-        self._populate_languages(self._target_lang, include_auto=False)
-        self._target_lang.setCurrentText("English")
-        self._target_lang.currentIndexChanged.connect(self._emit_change)
         lang_layout.addWidget(self._target_lang, 1, 1)
 
+        # Constraint note
+        self._lang_note = QLabel("⚠ slower options use 2-hop via English (source→en→target).")
+        self._lang_note.setStyleSheet("color: #FF9800; font-size: 10px; font-style: italic;")
+        self._lang_note.setWordWrap(True)
+        lang_layout.addWidget(self._lang_note, 2, 0, 1, 2)
+
         layout.addWidget(lang_group)
+
+        # --- Whisper Model (moved between Language and Translation) ---
+        model_group = QGroupBox("Whisper Model")
+        model_layout = QVBoxLayout(model_group)
+        model_layout.setContentsMargins(GROUP_MARGINS, GROUP_MARGINS, GROUP_MARGINS, GROUP_MARGINS)
+        model_layout.setSpacing(GROUP_SPACING)
+
+        self._model_selector = WheelIgnoringComboBox()
+        self._model_selector.setMinimumWidth(280)
+        for value, label in MODEL_OPTIONS:
+            self._model_selector.addItem(label, value)
+        self._model_selector.currentIndexChanged.connect(self._on_model_selection_changed)
+        model_layout.addWidget(self._model_selector)
+
+        download_row = QHBoxLayout()
+        download_row.setSpacing(8)
+        self._model_status_label = QLabel("")
+        download_row.addWidget(self._model_status_label, 1)
+        self._download_btn = QPushButton("Download")
+        self._download_btn.setMinimumHeight(32)
+        self._download_btn.clicked.connect(self._download_selected_model)
+        self._download_btn.setEnabled(False)
+        download_row.addWidget(self._download_btn)
+        model_layout.addLayout(download_row)
+
+        self._update_model_download_status()
+
+        model_layout.addWidget(QLabel(
+            "Note: Larger models are more accurate but slower and use more RAM"
+        ))
+        model_layout.addWidget(QLabel(
+            "Note: Choose tiny if you dont have a vga."
+        ))
+
+        layout.addWidget(model_group)
 
         # --- Translation ---
         trans_group = QGroupBox("Translation")
@@ -143,29 +189,25 @@ class SettingsPanel(QWidget):
 
         self._translation_toggle = QCheckBox("Enable Translation")
         self._translation_toggle.setChecked(True)
-        self._translation_toggle.setMinimumHeight(10)
         self._translation_toggle.stateChanged.connect(self._emit_change)
         trans_layout.addWidget(self._translation_toggle)
 
-        mode_layout = QHBoxLayout()
-        mode_layout.setSpacing(5)
-        self._mode_label = QLabel("Mode:")
-        self._mode_label.setMinimumHeight(20)
-        mode_layout.addWidget(self._mode_label)
-        self._translation_mode = WheelIgnoringComboBox()
-        self._translation_mode.setMinimumWidth(200)
-        self._translation_mode.setMinimumHeight(20)
-        self._translation_mode.addItem("Offline (Argos)", "offline")
-        self._translation_mode.addItem("Online (LibreTranslate)", "online")
-        self._translation_mode.addItem("Local (LTEngine)", "ltengine")
-        self._translation_mode.currentIndexChanged.connect(self._emit_change)
-        mode_layout.addWidget(self._translation_mode)
-        mode_layout.addStretch()
-        trans_layout.addLayout(mode_layout)
+        # Engine selector
+        engine_row = QHBoxLayout()
+        engine_row.setSpacing(6)
+        engine_row.addWidget(QLabel("Engine:"))
+        self._engine_selector = WheelIgnoringComboBox()
+        self._engine_selector.setMinimumWidth(160)
+        self._engine_selector.addItem("Argos Translate", "argos")
+        self._engine_selector.addItem("Small100 (M2M-100)", "small100")
+        self._engine_selector.currentIndexChanged.connect(self._on_engine_changed)
+        engine_row.addWidget(self._engine_selector, 1)
+        trans_layout.addLayout(engine_row)
 
         self._translation_status = QLabel("Translation: Not ready (checking engines...)")
         self._translation_status.setMinimumHeight(35)
         trans_layout.addWidget(self._translation_status)
+        trans_layout.addWidget(QLabel("Note: Choose Argos if you dont have a vga"))
 
         layout.addWidget(trans_group)
 
@@ -191,17 +233,15 @@ class SettingsPanel(QWidget):
         overlay_layout = QGridLayout(overlay_group)
         overlay_layout.setContentsMargins(GROUP_MARGINS, GROUP_MARGINS, GROUP_MARGINS, GROUP_MARGINS)
         overlay_layout.setSpacing(GROUP_SPACING)
-        overlay_layout.setColumnStretch(0, 0)  # label column
-        overlay_layout.setColumnStretch(1, 1)  # slider column — stretches
-        overlay_layout.setColumnStretch(2, 0)  # value label column
+        overlay_layout.setColumnStretch(0, 0)
+        overlay_layout.setColumnStretch(1, 1)
+        overlay_layout.setColumnStretch(2, 0)
 
-        # Row heights — scroll area handles overflow now
         overlay_layout.setRowMinimumHeight(0, 10)
         overlay_layout.setRowMinimumHeight(1, 10)
         overlay_layout.setRowMinimumHeight(2, 10)
         overlay_layout.setRowMinimumHeight(3, 10)
 
-        # Font Size row
         overlay_layout.addWidget(QLabel("Font Size:"), 0, 0)
         self._font_slider = WheelIgnoringSlider(Qt.Orientation.Horizontal)
         self._font_slider.setRange(12, 72)
@@ -214,7 +254,6 @@ class SettingsPanel(QWidget):
         self._font_slider.valueChanged.connect(lambda v: self._font_label.setText(str(v)))
         overlay_layout.addWidget(self._font_label, 0, 2)
 
-        # Opacity row
         overlay_layout.addWidget(QLabel("Opacity:"), 1, 0)
         self._opacity_slider = WheelIgnoringSlider(Qt.Orientation.Horizontal)
         self._opacity_slider.setRange(0, 100)
@@ -227,7 +266,6 @@ class SettingsPanel(QWidget):
         self._opacity_slider.valueChanged.connect(lambda v: self._opacity_label.setText(f"{v}%"))
         overlay_layout.addWidget(self._opacity_label, 1, 2)
 
-        # Line Spacing row
         overlay_layout.addWidget(QLabel("Spacing:"), 2, 0)
         self._spacing_slider = WheelIgnoringSlider(Qt.Orientation.Horizontal)
         self._spacing_slider.setRange(5, 30)
@@ -242,46 +280,12 @@ class SettingsPanel(QWidget):
         )
         overlay_layout.addWidget(self._spacing_label, 2, 2)
 
-        # Color picker button (span full width)
         self._color_btn = QPushButton("Text Color")
         self._color_btn.setMinimumHeight(36)
         self._color_btn.clicked.connect(self._pick_color)
         overlay_layout.addWidget(self._color_btn, 3, 0, 1, 3)
 
         layout.addWidget(overlay_group)
-
-        # --- Whisper Model ---
-        model_group = QGroupBox("Whisper Model")
-        model_layout = QVBoxLayout(model_group)
-        model_layout.setContentsMargins(GROUP_MARGINS, GROUP_MARGINS, GROUP_MARGINS, GROUP_MARGINS)
-        model_layout.setSpacing(GROUP_SPACING)
-
-        self._model_selector = WheelIgnoringComboBox()
-        self._model_selector.setMinimumWidth(280)
-        for value, label in MODEL_OPTIONS:
-            self._model_selector.addItem(label, value)
-        self._model_selector.currentIndexChanged.connect(self._on_model_selection_changed)
-        model_layout.addWidget(self._model_selector)
-
-        # Download / status row per model size
-        download_row = QHBoxLayout()
-        download_row.setSpacing(8)
-        self._model_status_label = QLabel("")
-        download_row.addWidget(self._model_status_label, 1)
-        self._download_btn = QPushButton("Download")
-        self._download_btn.setMinimumHeight(32)
-        self._download_btn.clicked.connect(self._download_selected_model)
-        self._download_btn.setEnabled(False)
-        download_row.addWidget(self._download_btn)
-        model_layout.addLayout(download_row)
-
-        self._update_model_download_status()
-
-        model_layout.addWidget(QLabel(
-            "Note: Larger models are more accurate but slower and use more RAM."
-        ))
-
-        layout.addWidget(model_group)
 
         # --- Theme ---
         theme_group = QGroupBox("Theme")
@@ -313,15 +317,90 @@ class SettingsPanel(QWidget):
 
         layout.addLayout(util_layout)
 
+        # --- Credit ---
+        credit_label = QLabel("Credit by Sawashi - Kiet Le")
+        credit_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        credit_label.setStyleSheet("color: #888; font-size: 11px; padding: 6px;")
+        layout.addWidget(credit_label)
+
         layout.addStretch()
         self.setLayout(layout)
+
+        # Set defaults: en → vi, then populate target
+        self._source_lang.setCurrentIndex(0)  # English is first
+        self._rebuild_target_lang(self._source_lang.currentData())
 
     def _populate_languages(self, combo: QComboBox, include_auto: bool = False):
         """Fill a combo box with language options."""
         if include_auto:
             combo.addItem("Auto Detect", "auto")
         for lang in self._lang_data.get("whisper_languages", []):
+            if lang["code"] == "auto":
+                continue
             combo.addItem(lang["name"], lang["code"])
+
+    def _rebuild_target_lang(self, src_code: str):
+        """Rebuild target lang combo based on source and active engine.
+
+        For Argos:
+          - no marker = direct translation (fast, 1 hop)
+          - ⚠ slower = via English (2 hops: src → en → target)
+        For Small100: all pairs direct, no markers.
+        """
+        self._target_lang.blockSignals(True)
+        self._target_lang.clear()
+
+        if self._engine == "small100":
+            pairs = self._small100_pairs
+            direct_codes = set(pairs.get(src_code, []))
+            for lang in self._lang_data.get("whisper_languages", []):
+                code = lang["code"]
+                if code == src_code:
+                    continue
+                if code in direct_codes:
+                    self._target_lang.addItem(lang["name"], ("direct", code))
+        else:
+            direct_codes = set(self._argos_pairs.get(src_code, []))
+            en_targets = set(self._argos_pairs.get("en", []))
+            for lang in self._lang_data.get("whisper_languages", []):
+                code = lang["code"]
+                if code == src_code:
+                    continue
+                if code in direct_codes:
+                    self._target_lang.addItem(lang["name"], ("direct", code))
+                elif src_code != "en" and "en" in self._argos_pairs.get(src_code, []) and code in en_targets:
+                    self._target_lang.addItem(f"{lang['name']} ⚠ slower", ("hop2", code))
+
+        # Select Vietnamese if available, else first item
+        vi_idx = None
+        for i in range(self._target_lang.count()):
+            item = self._target_lang.itemData(i)
+            if isinstance(item, tuple) and item[1] == "vi":
+                vi_idx = i
+                break
+        if vi_idx is not None:
+            self._target_lang.setCurrentIndex(vi_idx)
+        elif self._target_lang.count() > 0:
+            self._target_lang.setCurrentIndex(0)
+
+        self._target_lang.blockSignals(False)
+        self._emit_change()
+
+    def _on_engine_changed(self):
+        """Engine selection changed → rebuild target options."""
+        self._engine = self._engine_selector.currentData()
+        # Show/hide the hop2 warning note
+        if self._engine == "small100":
+            self._lang_note.setVisible(False)
+        else:
+            self._lang_note.setVisible(True)
+        src = self._source_lang.currentData()
+        self._rebuild_target_lang(src)
+
+    def _on_source_lang_changed(self):
+        """Source language changed → rebuild target options."""
+        src = self._source_lang.currentData()
+        self._rebuild_target_lang(src)
 
     def _on_start_stop(self):
         """Toggle capture state."""
@@ -338,24 +417,30 @@ class SettingsPanel(QWidget):
 
     def _open_log_folder(self):
         """Open the log folder in file explorer."""
-        log_dir = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "LiveTranslateOverlay", "logs")
+        log_dir = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "LotusTranslator", "logs")
         os.makedirs(log_dir, exist_ok=True)
         os.startfile(log_dir)
 
     def _reset_settings(self):
         """Reset to default settings."""
         self._font_slider.setValue(24)
-        self._opacity_slider.setValue(70)
+        self._opacity_slider.setValue(20)
         self._spacing_slider.setValue(12)
-        self._source_lang.setCurrentText("Auto Detect")
-        self._target_lang.setCurrentText("English")
+        self._buffer_slider.setValue(19)
+        self._buffer_label.setText("1.9s")
+        self._source_lang.setCurrentIndex(0)  # English
+        # target rebuilds via _on_source_lang_changed → _rebuild_target_lang which picks vi
         self._display_mode.setCurrentText("Bilingual")
         self._model_selector.setCurrentIndex(1)
         self._theme_selector.setCurrentText("Dark")
         self._translation_toggle.setChecked(True)
-        self._translation_mode.setCurrentText("Offline (Argos)")
+        self._engine_selector.setCurrentIndex(1)  # Small100 (default)
         self._selected_color = "#FFFFFF"
         self._emit_change()
+        # Reposition overlay to screen center and reset size
+        main_window = self.window()
+        if hasattr(main_window, '_overlay') and main_window._overlay:
+            main_window._overlay.center_on_screen_and_reset_size()
 
     def _on_model_selection_changed(self):
         """Update download status and emit change when model selection changes."""
@@ -368,13 +453,23 @@ class SettingsPanel(QWidget):
 
     # ---- Getters for settings values ----
 
+    def get_target_data(self) -> tuple:
+        """Get (mode, code) tuple from target combo, e.g. ('direct', 'ja') or ('hop2', 'vi')."""
+        data = self._target_lang.currentData()
+        if data is None:
+            return ("direct", "vi")
+        return data
+
     def get_settings(self) -> dict:
         """Return current settings as a dict."""
+        mode, tgt_code = self.get_target_data()
         return {
             "source_language": self._source_lang.currentData(),
-            "target_language": self._target_lang.currentData(),
+            "target_language": tgt_code,
+            "target_mode": mode,
             "translation_enabled": self._translation_toggle.isChecked(),
-            "translation_mode": self._translation_mode.currentData(),
+            "translation_mode": "offline",
+            "translation_engine": self._engine_selector.currentData(),
             "display_mode": self._display_mode.currentData(),
             "whisper_model": self._model_selector.currentData(),
             "font_size": self._font_slider.value(),
@@ -387,30 +482,36 @@ class SettingsPanel(QWidget):
 
     def apply_settings(self, settings: dict):
         """Apply settings from a dict."""
-        # Block signals during bulk update
         self.blockSignals(True)
 
-        # Source language
-        src_code = settings.get("source_language", "auto")
+        src_code = settings.get("source_language", "en")
         for i in range(self._source_lang.count()):
             if self._source_lang.itemData(i) == src_code:
                 self._source_lang.setCurrentIndex(i)
                 break
 
-        # Target language
-        tgt_code = settings.get("target_language", "en")
+        # Rebuild target after source set
+        self._rebuild_target_lang(self._source_lang.currentData())
+
+        tgt_code = settings.get("target_language", "vi")
         for i in range(self._target_lang.count()):
-            if self._target_lang.itemData(i) == tgt_code:
+            item = self._target_lang.itemData(i)
+            if isinstance(item, tuple) and item[1] == tgt_code:
+                self._target_lang.setCurrentIndex(i)
+                break
+            elif item == tgt_code:
                 self._target_lang.setCurrentIndex(i)
                 break
 
         self._translation_toggle.setChecked(settings.get("translation_enabled", True))
 
-        mode = settings.get("translation_mode", "offline")
-        for i in range(self._translation_mode.count()):
-            if self._translation_mode.itemData(i) == mode:
-                self._translation_mode.setCurrentIndex(i)
+        # Apply engine selector
+        engine = settings.get("translation_engine", "small100")
+        for i in range(self._engine_selector.count()):
+            if self._engine_selector.itemData(i) == engine:
+                self._engine_selector.setCurrentIndex(i)
                 break
+        self._engine = engine  # sync internal state
 
         display = settings.get("display_mode", "bilingual")
         for i in range(self._display_mode.count()):
@@ -428,7 +529,7 @@ class SettingsPanel(QWidget):
         self._selected_color = settings.get("font_color", "#FFFFFF")
         self._opacity_slider.setValue(int(settings.get("overlay_opacity", 0.7) * 100))
         self._spacing_slider.setValue(int(settings.get("line_spacing", 1.2) * 10))
-        buf = settings.get("buffer_duration", 2.0)
+        buf = settings.get("buffer_duration", 1.9)
         self._buffer_slider.setValue(int(buf * 10))
         self._buffer_label.setText(f"{buf:.1f}s")
 
@@ -450,7 +551,6 @@ class SettingsPanel(QWidget):
     def _check_model_on_disk(self, size: str) -> bool:
         """Check if a Whisper model is fully downloaded on disk."""
         import glob
-        # The huggingface hub cache stores model.bin under the snapshot directory
         pattern = os.path.join(self._model_dir(), f"models--Systran--faster-whisper-{size}", "snapshots", "*", "model.bin")
         return len(glob.glob(pattern)) > 0
 
@@ -482,22 +582,18 @@ class SettingsPanel(QWidget):
         import threading
         from PyQt6.QtCore import QMetaObject, Qt, Q_ARG
 
-        # Estimate total size in bytes for progress calculation
         size_map = {"tiny": 150_000_000, "small": 470_000_000, "medium": 1_500_000_000}
         total_size = size_map.get(selected, 500_000_000)
 
         def _poll_progress():
-            """Poll files written to the model cache dir and update progress label."""
             import glob, os
             while True:
-                # Scan all files recursively (excluding dirs themselves)
                 model_cache_dir = os.path.join(
                     self._model_dir(), f"models--Systran--faster-whisper-{selected}"
                 )
                 downloaded = 0
                 if os.path.isdir(model_cache_dir):
                     for root, dirs, files in os.walk(model_cache_dir):
-                        # Skip .cache/locks dirs to avoid counting temp metadata
                         dirs[:] = [d for d in dirs if not d.startswith(".cache") and d != "locks"]
                         downloaded += sum(
                             os.path.getsize(os.path.join(root, f))
@@ -514,7 +610,7 @@ class SettingsPanel(QWidget):
                         Q_ARG(str, f"{pct}%")
                     )
                 except RuntimeError:
-                    break  # Widget was deleted (app closing)
+                    break
                 if self._check_model_on_disk(selected):
                     break
                 threading.Event().wait(0.5)
@@ -525,7 +621,7 @@ class SettingsPanel(QWidget):
             try:
                 import torch
                 device = "cuda" if torch.cuda.is_available() else "cpu"
-                compute = "int8"  # int8 avoids cuDNN dependency on Windows
+                compute = "int8"
                 from faster_whisper import WhisperModel
                 _ = WhisperModel(
                     selected,

@@ -1,183 +1,151 @@
 # Live Translate Overlay
 
-A Windows desktop application that captures system audio, performs real-time speech recognition, translates text, and displays subtitles as a floating overlay on top of any application.
+Real-time audio capture → speech recognition → translation → floating subtitle overlay for Windows.
 
-Works with YouTube, Netflix, VLC, MP4 files, Bilibili, Twitch, browser audio, desktop applications, and games running in windowed or borderless mode.
+## Quick Start (Users)
 
-**No phone, browser extension, virtual audio cable, OBS, or external device required.**
+1. Download `LiveTranslateOverlay_Setup_v1.0.0_Part1.exe` (and any `.bin` parts)
+2. Run the `.exe` — installer extracts everything
+3. Launch from Start Menu / Desktop shortcut
+4. First launch runs environment check (logs to `%LOCALAPPDATA%\LiveTranslateOverlay\logs\`)
+5. Start speaking — subtitles appear as floating overlay
 
-## Features
+**Requirements:**
+- Windows 10 or later
+- NVIDIA GPU with CUDA 12.4 recommended (CPU fallback works but slower)
+- 8 GB RAM minimum, 16 GB recommended
+- 10 GB free disk space (for bundled models)
 
-- **System Audio Capture** - Captures audio from Windows playback via WASAPI Loopback
-- **Real-Time Speech Recognition** - Powered by faster-whisper with models from tiny to medium
-- **Offline Translation** - Argos Translate works without internet
-- **Online Translation** - LibreTranslate public API for better quality (optional)
-- **Floating Subtitle Overlay** - Always-on-top, frameless, transparent, click-through mode
-- **Bilingual Display** - Show original + translated text simultaneously
-- **Customizable** - Font size, color, opacity, line spacing, themes
-- **Lightweight** - Under 1 GB RAM, under 15% CPU on mid-range hardware
+## Build from Source (Developers)
 
-## Requirements
+### Prerequisites
 
-- Windows 10 or 11 (64-bit)
-- 4 GB RAM minimum, 8 GB recommended
-- 2 GB free disk space
-- No GPU required (CUDA auto-detected)
+1. **Python 3.12** (auto-managed via `run_with_py312.py` — download/install if missing)
+2. **Inno Setup 6+** — https://jrsoftware.org/isdl.php (add `iscc.exe` to PATH)
+3. **Visual C++ Redistributable** — https://aka.ms/vs/17/release/vc_redist.x64.exe
+   - Download and save to `installer\vc_redist.x64.exe`
 
-## Quick Start
+### Setup Build Environment
 
-### From Source (Development)
+The project auto-manages a Python 3.12 virtual environment. Use `run_with_py312.py` (or the `python312.bat` shortcut) for all pip commands:
 
-1. Install Python 3.11 or later from [python.org](https://python.org)
+```batch
+# Install Python dependencies (auto-creates .venv with Python 3.12)
+python run_with_py312.py pip install -r requirements.txt
 
-2. Clone or extract the project:
+# Or using the batch shortcut
+python312.bat pip install -r requirements.txt
 
-```bash
-cd live_translate_overlay
+# Install PyTorch with CUDA 12.4
+python run_with_py312.py pip install torch==2.6.0+cu124 torchaudio==2.6.0+cu124 --index-url https://download.pytorch.org/whl/cu124
 ```
 
-3. Install dependencies:
+> **Note:** If Python 3.12 is not installed, it's automatically downloaded and installed silently to `%LOCALAPPDATA%\Programs\Python\Python312`. No manual Python installation required.
 
-```bash
-pip install -r requirements.txt
-```
+### Running the App
 
-4. Run the application:
+```batch
+# Auto-ensures Python 3.12 .venv, then launches
+python run_with_py312.py main.py
 
-```bash
+# Or simply (auto-relaunches if wrong Python version):
 python main.py
 ```
 
-5. Click **Start Capture** in the UI.
-6. Play any audio/video on your computer.
-7. Subtitles appear on the floating overlay.
+### Pre-Build Check
 
-### Building the Installer
-
-1. Install PyInstaller:
-
-```bash
-pip install pyinstaller
+```batch
+python installer\preinstall_check.py
 ```
 
-2. Build the executable:
+This verifies:
+- Python version
+- All pip packages installed
+- Inno Setup compiler available
+- NVIDIA GPU + CUDA
+- All model files present
 
-```bash
-pyinstaller live_translate.spec
+### Build Installer
+
+```batch
+installer\build_installer.bat
 ```
 
-3. Download and install [Inno Setup](https://jrsoftware.org/isinfo.php).
-4. Open `installer/setup.iss` and compile (or run from command line):
+This will:
+1. Clean previous build artifacts
+2. Run PyInstaller → `dist\LiveTranslateOverlay\LiveTranslateOverlay.exe`
+3. Run Inno Setup → `dist\LiveTranslateOverlay_Setup_v1.0.0_Part1.exe` (+ parts if >2GB)
 
-```bash
-iscc installer/setup.iss
-```
+### Output
 
-5. The installer is created in the `dist/` folder.
+| File | Description |
+|------|-------------|
+| `dist\LiveTranslateOverlay_Setup_v1.0.0_Part1.exe` | Installer (part 1 of N) |
+| `dist\LiveTranslateOverlay_Setup_v1.0.0_Part2.bin` | Installer part 2 (if needed) |
+| `dist\build_log.txt` | Build log |
 
-## Usage
+## First-Run Bootstrap
 
-### Main Window
+On first launch, the app runs `installer/bootstrap_setup.py` which:
+1. Checks for NVIDIA GPU + CUDA 12.4
+2. Verifies all Python packages are installed
+3. Checks CUDA runtime DLLs
+4. Verifies model files exist
+5. Checks Argos translation packages
+6. Writes status to `%LOCALAPPDATA%\LiveTranslateOverlay\logs\bootstrap_*.log`
 
-| Control | Description |
-|---------|-------------|
-| **Start/Stop Capture** | Begin or end audio capture |
-| **Source Language** | Select input language (Auto Detect available) |
-| **Translation Toggle** | Enable or disable translation |
-| **Translation Mode** | Offline (Argos) or Online (LibreTranslate) |
-| **Target Language** | Select output language |
-| **Display Mode** | Original, Translated, or Bilingual |
-| **Font Size** | Slider from 12px to 72px |
-| **Opacity** | Overlay background opacity |
-| **Line Spacing** | Adjust subtitle line spacing |
-| **Text Color** | Pick any color |
-| **Whisper Model** | tiny (fastest) / small (balanced) / medium (accurate) |
-| **Theme** | Light or Dark |
+If CUDA is missing, a notice is shown. Run `installer\cuda_setup.bat` as Administrator to install.
 
-### Overlay
+## Logs
 
-- **Double-click** to toggle between Drag Mode and Click-Through Mode
-- **Drag Mode**: Visible border, clickable, resizable
-- **Click-Through Mode**: Transparent to mouse, clicks pass through to underlying windows
-
-### Supported Languages
-
-Auto Detect, English, Japanese, Chinese, Korean, Vietnamese, Spanish, French, German.
-
-Language configuration is data-driven via `languages.json` — add more without code changes.
-
-### Translation Pairs (Minimum)
-
-Japanese ↔ English, Chinese ↔ English, Korean ↔ English, Vietnamese ↔ English, Spanish ↔ English, French ↔ English, German ↔ English.
+| Log | Location |
+|-----|----------|
+| Installer log | `%LOCALAPPDATA%\LiveTranslateOverlay\logs\install.log` |
+| Bootstrap log | `%LOCALAPPDATA%\LiveTranslateOverlay\logs\bootstrap_*.log` |
+| App runtime log | `%APPDATA%\LotusTranslator\logs\lotus_translator.log` |
+| Build log | `dist\build_log.txt` |
 
 ## Architecture
 
 ```
-Audio (WASAPI Loopback)
-  → Audio Queue (thread-safe)
-    → faster-whisper (speech recognition thread)
-      → Text Queue (thread-safe)
-        → Translation Engine (translation thread)
-          → Subtitle Queue (thread-safe)
-            → Overlay UI (main thread, 100ms polling)
-```
-
-All components run in separate worker threads to keep the UI responsive.
-
-## Project Structure
-
-```
-live_translate_overlay/
-├── main.py                      # Entry point
-├── config.json                  # Application configuration
-├── languages.json               # Data-driven language definitions
-├── requirements.txt             # Python dependencies
-├── live_translate.spec          # PyInstaller spec
-├── README.md                    # This file
-├── ui/                          # UI components
-│   ├── main_window.py           # Main application window
-│   └── settings_panel.py        # Settings controls
-├── overlay/
-│   └── subtitle_overlay.py      # Floating subtitle overlay
-├── audio/
-│   └── wasapi_capture.py        # WASAPI loopback capture
-├── speech/
-│   └── whisper_engine.py        # faster-whisper wrapper
+live_subtitle/
+├── main.py                    # Entry point + bootstrap
+├── audio/wasapi_capture.py    # WASAPI loopback audio capture
+├── speech/whisper_engine.py   # faster-whisper speech recognition
 ├── translation/
-│   ├── argos_engine.py          # Argos Translate offline
-│   └── libretranslate_engine.py # LibreTranslate online
-├── settings/
-│   └── settings_manager.py      # JSON config persistence
-├── workers/
-│   ├── capture_worker.py        # Audio capture thread
-│   ├── recognition_worker.py    # Speech recognition thread
-│   └── translation_worker.py    # Translation thread
-├── assets/                      # Icons, images
-├── models/                      # Bundled whisper models
-└── installer/
-    └── setup.iss                # Inno Setup script
+│   ├── argos_engine.py        # Argos offline translation
+│   └── small100_engine.py     # Small100 (M2M-100) translation
+├── overlay/subtitle_overlay.py # Floating subtitle window
+├── ui/                        # Qt6 UI panels
+├── installer/
+│   ├── setup.iss              # Inno Setup script
+│   ├── build_installer.bat    # One-click build
+│   ├── bootstrap_setup.py     # First-run env checker
+│   ├── preinstall_check.py    # Pre-build validation
+│   └── cuda_setup.bat         # CUDA install helper
+├── models/                    # Bundled model files
+│   ├── models--Systran--faster-whisper-{tiny,small,medium}/
+│   └── small100/
+└── config.json                # Default configuration
 ```
 
-## Logging
+## Troubleshooting
 
-Logs are stored in:
-```
-%APPDATA%\LiveTranslateOverlay\logs\live_translate.log
-```
+**App won't start:**
+- Check `%APPDATA%\LotusTranslator\logs\lotus_translator.log`
+- Check `%LOCALAPPDATA%\LiveTranslateOverlay\logs\bootstrap_*.log`
 
-Maximum log size: 5 MB with 3 rotating backups.
+**No GPU detected:**
+- Run `installer\cuda_setup.bat` as Administrator
+- Ensure NVIDIA driver ≥ 551.61 installed
 
-## Error Recovery
+**Installation fails:**
+- Check `%LOCALAPPDATA%\LiveTranslateOverlay\logs\install.log`
+- Ensure VC++ Redist is installed
+- Run installer as Administrator
 
-| Scenario | Behavior |
-|----------|----------|
-| No audio device | Shows error message, waits for device |
-| Device disconnected | Graceful stop, shows status |
-| Whisper model not loaded | Shows error, retries |
-| Argos package missing | Clear instructions to install |
-| LibreTranslate fails | Silent fallback to Argos |
-| GPU not available | Silent fallback to CPU |
+# 1. Verify env
+python installer\preinstall_check.py
 
-## License
-
-Free and open source. No API keys, no subscriptions, no paid services.
+# 2. Build installer
+installer\build_installer.bat

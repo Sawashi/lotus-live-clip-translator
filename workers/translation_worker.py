@@ -1,8 +1,7 @@
 """Translation worker thread.
 
-Processes transcribed text and translates it.
-Supports offline (Argos), online (LibreTranslate), and local (LTEngine) modes.
-Only uses the engine matching the user's selected mode.
+Processes transcribed text and translates it using either
+Argos Translate (offline) or Small100 (offline) engine.
 """
 
 import queue
@@ -10,14 +9,11 @@ import time
 import logging
 import threading
 from translation.argos_engine import ArgosEngine
-from translation.libretranslate_engine import LibreTranslateEngine
-from translation.ltengine_engine import LTEngine
 
 logger = logging.getLogger(__name__)
 
-TRANSLATION_MODE_OFFLINE = "offline"
-TRANSLATION_MODE_ONLINE = "online"
-TRANSLATION_MODE_LTENGINE = "ltengine"
+ENGINE_ARGOS = "argos"
+ENGINE_SMALL100 = "small100"
 
 
 class TranslationWorker(threading.Thread):
@@ -26,19 +22,21 @@ class TranslationWorker(threading.Thread):
     def __init__(
         self,
         text_queue: queue.Queue,
-        subtitle_queue: queue.Queue
+        subtitle_queue: queue.Queue,
+        engine_type: str = ENGINE_ARGOS,
     ):
         super().__init__(daemon=True)
         self._text_queue = text_queue
         self._subtitle_queue = subtitle_queue
+        self._engine_type = engine_type
         self._argos = ArgosEngine()
-        self._libre = LibreTranslateEngine()
-        self._ltengine = LTEngine()
+        self._small100 = None  # lazy init
+        self._current_engine = None  # active engine instance
         self._running = False
         self._enabled = True
-        self._mode = TRANSLATION_MODE_OFFLINE
         self._source_language = "auto"
         self._target_language = "en"
+        self._target_mode = "direct"
         self._status = "not_ready"
         self._status_detail = ""
         self._engines_checked = False
@@ -48,21 +46,19 @@ class TranslationWorker(threading.Thread):
     def run(self):
         """Run the translation loop."""
         self._running = True
-        logger.info("Translation worker started")
+        logger.info("Translation worker started (engine=%s)", self._engine_type)
 
-        # Check engines in background thread (don't block startup)
+        # Check engines in background thread
         threading.Thread(target=self._check_all_engines, daemon=True).start()
 
         while self._running:
             try:
                 msg = self._text_queue.get(timeout=0.5)
 
-                # Handle reset signal from recognition worker (silence gap)
                 if msg.get("type") == "reset":
                     logger.debug("Translation worker: received reset signal, clearing state")
                     self._last_original = ""
                     self._last_translated = ""
-                    # Forward reset to overlay
                     self._subtitle_queue.put({"type": "reset"})
                     continue
 
@@ -75,7 +71,6 @@ class TranslationWorker(threading.Thread):
                     continue
 
                 text = msg["text"]
-
                 translated = self._translate(text)
                 if translated:
                     logger.debug("Translated: '%s' → '%s'", text[:30], translated[:30])
@@ -103,14 +98,21 @@ class TranslationWorker(threading.Thread):
         self._enabled = enabled
 
     def set_mode(self, mode: str):
-        """Set translation mode (offline/online/ltengine)."""
+        """Set translation mode (only offline supported)."""
         self._mode = mode
         self._update_status()
 
-    def set_languages(self, source: str, target: str):
-        """Set source and target languages."""
+    def set_engine(self, engine_type: str):
+        """Change translation engine type."""
+        self._engine_type = engine_type
+        self._current_engine = None  # force re-init
+        self._update_status()
+
+    def set_languages(self, source: str, target: str, mode: str = "direct"):
+        """Set source and target languages with translation mode."""
         self._source_language = source
         self._target_language = target
+        self._target_mode = mode
 
     @property
     def status(self) -> str:
@@ -123,111 +125,89 @@ class TranslationWorker(threading.Thread):
             if not self._engines_checked:
                 return "Not ready (checking engines...)"
             return f"Not ready ({self._status_detail})"
-        return self._status.capitalize()
+        return f"{self._status.capitalize()} ({self._engine_type})"
+
+    @property
+    def engine_type(self) -> str:
+        return self._engine_type
+
+    def _get_engine(self):
+        """Get or initialize the active engine."""
+        if self._current_engine is not None:
+            return self._current_engine
+
+        try:
+            if self._engine_type == ENGINE_SMALL100:
+                if self._small100 is None:
+                    from translation.small100_engine import Small100Engine
+                    self._small100 = Small100Engine()
+                self._current_engine = self._small100
+            else:
+                self._current_engine = self._argos
+        except Exception as e:
+            logger.error("Failed to initialize %s engine: %s", self._engine_type, e)
+            # Set to argos as fallback to avoid infinite retry
+            self._current_engine = self._argos
+
+        return self._current_engine
 
     def _check_all_engines(self):
-        """Check all translation engines and update status (for UI display only)."""
+        """Check translation engine and update status."""
         self._engines_checked = False
 
-        # Check Argos
-        self._status_detail = "checking argos..."
-        logger.info("Checking Argos Translate...")
-        if self._argos.is_ready:
-            logger.info("Argos Translate: ready")
-        else:
-            logger.info("Argos Translate: not ready (no packages installed)")
+        engine = self._get_engine()
+        self._status_detail = f"checking {self._engine_type}..."
+        logger.info("Checking %s ...", self._engine_type)
 
-        # Check LibreTranslate
-        self._status_detail = "checking libre..."
-        logger.info("Checking LibreTranslate...")
-        libre_ok = self._libre.check_connection()
-        if libre_ok:
-            logger.info("LibreTranslate: available")
+        if engine.is_ready:
+            logger.info("%s: ready", self._engine_type)
         else:
-            logger.info("LibreTranslate: not available")
-
-        # Check LTEngine
-        self._status_detail = "checking ltengine..."
-        logger.info("Checking LTEngine...")
-        lt_ok = self._ltengine.check_connection()
-        if lt_ok:
-            logger.info("LTEngine: available")
-        else:
-            logger.info("LTEngine: not available")
+            logger.info("%s: not ready", self._engine_type)
 
         self._engines_checked = True
         self._update_status()
         logger.info("Engine check complete. Status: %s", self._status)
 
     def _translate(self, text: str) -> str:
-        """Translate text using the user-selected engine mode.
+        """Translate text using the active engine.
 
-        If the selected engine fails, returns the original text as fallback
-        so the user still sees subtitles.
+        If it fails, returns the original text as fallback.
         """
         if self._source_language == "auto":
             logger.debug("Source=auto, passing through: '%s'", text[:50])
             return text
 
         try:
-            if self._mode == TRANSLATION_MODE_ONLINE:
-                result = self._libre.translate(
+            engine = self._get_engine()
+            if self._engine_type == ENGINE_ARGOS and self._target_mode == "hop2":
+                result = self._argos.translate_via_english(
                     text, self._source_language, self._target_language
                 )
-                if result:
-                    self._status = "online"
-                    return result
-                logger.warning("LibreTranslate returned no result, falling back to original")
-
-            elif self._mode == TRANSLATION_MODE_LTENGINE:
-                result = self._ltengine.translate(
-                    text, self._source_language, self._target_language
-                )
-                if result:
-                    self._status = "ltengine"
-                    return result
-                logger.warning("LTEngine returned no result, falling back to original")
-
             else:
-                # Offline mode - Argos
-                result = self._argos.translate(
+                result = engine.translate(
                     text, self._source_language, self._target_language
                 )
-                if result:
-                    self._status = "offline"
-                    return result
-                logger.warning("Argos returned no result, falling back to original")
+            if result:
+                self._status = "offline"
+                return result
+            logger.warning("%s returned no result, falling back to original", self._engine_type)
 
             self._update_status()
-            return text  # Fallback: show original text
+            return text
 
         except Exception as e:
             logger.error("Translation error: %s, falling back to original", e)
             self._update_status()
-            return text  # Fallback: show original text
+            return text
 
     def _update_status(self):
-        """Update the status indicator based on current mode and engine availability."""
-        if self._mode == TRANSLATION_MODE_ONLINE:
-            if self._libre.is_available:
-                self._status = "online"
-            else:
-                self._status = "not_ready"
-                self._status_detail = "LibreTranslate unavailable"
-
-        elif self._mode == TRANSLATION_MODE_LTENGINE:
-            if self._ltengine.is_available:
-                self._status = "ltengine"
-            else:
-                self._status = "not_ready"
-                self._status_detail = "LTEngine unavailable"
-
-        else:  # offline
-            if self._argos.is_ready:
-                self._status = "offline"
-            else:
-                self._status = "not_ready"
-                self._status_detail = "Argos packages not installed"
+        """Update the status indicator."""
+        engine = self._get_engine()
+        if engine.is_ready:
+            self._status = "offline"
+        else:
+            self._status = "not_ready"
+            self._status_detail = f"{self._engine_type} not loaded"
 
     def install_argos_package(self, from_code: str, to_code: str) -> bool:
         """Install an Argos translation package."""

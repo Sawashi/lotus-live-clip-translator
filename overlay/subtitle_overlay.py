@@ -5,14 +5,15 @@ subtitles over any application. Supports drag and click-through modes.
 """
 
 import logging
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QSizeGrip
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QSizeGrip, QApplication
 from PyQt6.QtCore import Qt, QPoint, QTimer, pyqtSignal, QRect
-from PyQt6.QtGui import QPainter, QColor, QFont, QFontMetrics, QPalette, QPen
+from PyQt6.QtGui import QPainter, QColor, QFont, QFontMetrics, QPen, QScreen
 
 logger = logging.getLogger(__name__)
 
 MAX_LINES = 3
 FADE_TIMEOUT = 5000  # ms
+MAX_WIDTH_FRAC = 0.85  # overlay max width = 85% of screen width
 
 
 class SubtitleLabel(QLabel):
@@ -65,11 +66,12 @@ class SubtitleOverlay(QWidget):
         layout.setContentsMargins(20, 10, 20, 10)
         layout.setSpacing(int(self._line_spacing * 4))
 
-        # Subtitle labels
+        # Subtitle labels — ensure visible text (white default)
         self._labels = []
         for i in range(MAX_LINES):
             label = SubtitleLabel(self)
             label.setVisible(False)
+            label.setStyleSheet(f"color: {self._font_color};")
             layout.addWidget(label)
             self._labels.append(label)
 
@@ -84,6 +86,7 @@ class SubtitleOverlay(QWidget):
 
     def paintEvent(self, event):
         """Draw translucent background."""
+        super().paintEvent(event)
         if self._bg_opacity > 0:
             painter = QPainter(self)
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -93,9 +96,10 @@ class SubtitleOverlay(QWidget):
 
             if self._drag_mode:
                 # Visible border in drag mode
+                painter.save()
                 painter.setPen(QColor(100, 100, 100, 200))
                 painter.drawRect(1, 1, self.width() - 2, self.height() - 2)
-                painter.setPen(Qt.PenStyle.NoPen)
+                painter.restore()
 
                 # Resize handle indicator (bottom-right corner)
                 grip_rect = QRect(
@@ -108,7 +112,13 @@ class SubtitleOverlay(QWidget):
                     painter.drawLine(x, y, grip_rect.right() - 4, y)
 
             painter.drawRoundedRect(self.rect().adjusted(0, 0, 0, 0), 8, 8)
-        super().paintEvent(event)
+
+    def _get_max_overlay_width(self) -> int:
+        """Get max allowed overlay width based on screen size."""
+        screen = QApplication.primaryScreen()
+        if screen:
+            return int(screen.availableSize().width() * MAX_WIDTH_FRAC)
+        return 1400  # fallback
 
     def set_subtitles(self, original: str, translated: str):
         """Update displayed subtitles.
@@ -122,30 +132,32 @@ class SubtitleOverlay(QWidget):
         else:  # bilingual
             self._set_label_text(original, translated)
 
+        # Clamp width to prevent overflow beyond screen
+        max_w = self._get_max_overlay_width()
+        if self.width() > max_w:
+            self.resize(max_w, self.height())
+
         # Reset fade timer
         self._fade_timer.start(FADE_TIMEOUT)
 
     def _set_label_text(self, line1: str, line2: str):
         """Set text on label widgets."""
-        # Show line1
-        self._labels[0].setText(line1 or "")
-        self._labels[0].setVisible(bool(line1))
+        # Hide all labels first
+        for lbl in self._labels:
+            lbl.setVisible(False)
 
-        if line2 and self._display_mode == "bilingual":
-            self._labels[1].setText(line2)
-            self._labels[1].setVisible(True)
-            self._labels[2].setVisible(False)
-        elif line1 and self._display_mode != "bilingual":
-            # Use second label for empty line if needed
-            self._labels[1].setVisible(False)
-            self._labels[2].setVisible(False)
-        else:
-            # For short bilingual lines, stack both in first two labels
-            if line2 and self._display_mode == "bilingual":
-                self._labels[0].setText(line1)
-                self._labels[1].setText(line2)
-                self._labels[1].setVisible(True)
-            self._labels[2].setVisible(False)
+        if self._display_mode == "original":
+            self._labels[0].setText(line1 or "")
+            self._labels[0].setVisible(bool(line1))
+        elif self._display_mode == "translated":
+            self._labels[0].setText(line2 or "")
+            self._labels[0].setVisible(bool(line2))
+        else:  # bilingual
+            self._labels[0].setText(line1 or "")
+            self._labels[0].setVisible(bool(line1))
+            self._labels[1].setText(line2 or "")
+            self._labels[1].setVisible(bool(line2))
+        # _labels[2] stays hidden (reserved for 3-line display)
 
     def _fade_out(self):
         """Fade out subtitles after timeout."""
@@ -278,7 +290,7 @@ class SubtitleOverlay(QWidget):
 
     def apply_settings(self, settings: dict):
         """Apply all visual settings from a settings dict.
-        
+
         Only restores position/size on initial load (not on live settings changes).
         """
         if "font_size" in settings:
@@ -294,3 +306,18 @@ class SubtitleOverlay(QWidget):
         # Only restore position/size if explicitly provided (initial load)
         if "overlay_x" in settings or "overlay_y" in settings:
             self.restore_position(settings)
+
+    # ---- Reset / Center ----
+
+    def center_on_screen_and_reset_size(self):
+        """Move overlay to screen center and reset to default size."""
+        screen = QApplication.primaryScreen()
+        if not screen:
+            return
+        geo = screen.availableGeometry()
+        w, h = 800, 200
+        x = geo.x() + (geo.width() - w) // 2
+        y = geo.y() + (geo.height() - h) // 2
+        self.move(x, y)
+        self.resize(w, h)
+        self.position_changed.emit(x, y)
