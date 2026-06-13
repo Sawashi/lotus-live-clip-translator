@@ -65,7 +65,7 @@ class SettingsPanel(QWidget):
         self._small100_pairs = self._lang_data.get("small100_pairs", {})
         self._selected_color = "#FFFFFF"
         self._capturing = False
-        self._engine = "argos"  # default
+        self._engine = "small100"  # default
         self._init_ui()
 
     def _init_ui(self):
@@ -434,7 +434,7 @@ class SettingsPanel(QWidget):
         self._model_selector.setCurrentIndex(1)
         self._theme_selector.setCurrentText("Dark")
         self._translation_toggle.setChecked(True)
-        self._engine_selector.setCurrentIndex(1)  # Argos (default)
+        self._engine_selector.setCurrentIndex(1)  # Small100 (default)
         self._selected_color = "#FFFFFF"
         self._emit_change()
         # Reposition overlay to screen center and reset size
@@ -506,7 +506,7 @@ class SettingsPanel(QWidget):
         self._translation_toggle.setChecked(settings.get("translation_enabled", True))
 
         # Apply engine selector
-        engine = settings.get("translation_engine", "argos")
+        engine = settings.get("translation_engine", "small100")
         for i in range(self._engine_selector.count()):
             if self._engine_selector.itemData(i) == engine:
                 self._engine_selector.setCurrentIndex(i)

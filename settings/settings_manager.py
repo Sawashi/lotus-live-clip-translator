@@ -14,8 +14,8 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_SETTINGS = {
     "theme": "dark",
-    "source_language": "auto",
-    "target_language": "en",
+    "source_language": "en",
+    "target_language": "vi",
     "translation_enabled": True,
     "translation_mode": "offline",
     "translation_engine": "small100",

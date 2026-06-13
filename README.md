@@ -20,19 +20,36 @@ Real-time audio capture → speech recognition → translation → floating subt
 
 ### Prerequisites
 
-1. **Python 3.10+** (tested with 3.10.11)
+1. **Python 3.12** (auto-managed via `run_with_py312.py` — download/install if missing)
 2. **Inno Setup 6+** — https://jrsoftware.org/isdl.php (add `iscc.exe` to PATH)
 3. **Visual C++ Redistributable** — https://aka.ms/vs/17/release/vc_redist.x64.exe
    - Download and save to `installer\vc_redist.x64.exe`
 
 ### Setup Build Environment
 
+The project auto-manages a Python 3.12 virtual environment. Use `run_with_py312.py` (or the `python312.bat` shortcut) for all pip commands:
+
 ```batch
-# Install Python dependencies
-pip install -r requirements.txt
+# Install Python dependencies (auto-creates .venv with Python 3.12)
+python run_with_py312.py pip install -r requirements.txt
+
+# Or using the batch shortcut
+python312.bat pip install -r requirements.txt
 
 # Install PyTorch with CUDA 12.4
-pip install torch==2.6.0+cu124 torchaudio==2.6.0+cu124 --index-url https://download.pytorch.org/whl/cu124
+python run_with_py312.py pip install torch==2.6.0+cu124 torchaudio==2.6.0+cu124 --index-url https://download.pytorch.org/whl/cu124
+```
+
+> **Note:** If Python 3.12 is not installed, it's automatically downloaded and installed silently to `%LOCALAPPDATA%\Programs\Python\Python312`. No manual Python installation required.
+
+### Running the App
+
+```batch
+# Auto-ensures Python 3.12 .venv, then launches
+python run_with_py312.py main.py
+
+# Or simply (auto-relaunches if wrong Python version):
+python main.py
 ```
 
 ### Pre-Build Check

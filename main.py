@@ -13,6 +13,22 @@ import json
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
 
+# --- Python 3.12 Check ---
+# If not running Python 3.12, auto-launch via run_with_py312.py
+if sys.version_info.major != 3 or sys.version_info.minor != 12:
+    script = os.path.abspath(__file__)
+    launcher = os.path.join(os.path.dirname(script), "run_with_py312.py")
+    if os.path.isfile(launcher):
+        print(f"Python {sys.version_info.major}.{sys.version_info.minor} detected — relaunching with Python 3.12...")
+        import subprocess
+        cmd = [sys.executable, launcher, script] + sys.argv[1:]
+        proc = subprocess.run(cmd)
+        sys.exit(proc.returncode)
+    else:
+        print(f"WARNING: Python {sys.version_info.major}.{sys.version_info.minor} — expected 3.12")
+        print(f"  Run: python run_with_py312.py {os.path.basename(script)}")
+        # Continue anyway, but log warning
+
 # Point to cuDNN 9 DLLs
 def _add_cudnn_path():
     import site
@@ -34,6 +50,9 @@ _add_cudnn_path()
 # Redirect stdout to suppress argostranslate print() spam BEFORE any imports
 _original_stdout = sys.stdout
 sys.stdout = io.StringIO()
+
+# Import onnxruntime BEFORE PyQt6 to avoid DLL conflict with Qt native libs
+import onnxruntime  # noqa: E402, F401
 
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt

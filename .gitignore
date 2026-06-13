@@ -44,3 +44,11 @@ config.json
 # Models (large binaries)
 models/models--Systran--faster-whisper-*/
 models/argos_packages/
+
+# Redundant model weight files (only pytorch_model.bin needed)
+models/small100/model.onnx
+models/small100/model.safetensors
+models/small100/.cache/
+models/small100/__pycache__/
+models/.locks/
+.venv/  

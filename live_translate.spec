@@ -5,7 +5,7 @@ PyInstaller spec for Live Translate Overlay.
 Builds a single Windows executable with:
 - All Python dependencies bundled
 - faster-whisper models (tiny/small/medium) included
-- small100 ONNX model (skip safetensors/pytorch_model.bin dups)
+- small100 ONNX model (only pytorch_model.bin, no safetensors/onnx dups)
 - Configuration files included
 """
 
@@ -19,16 +19,21 @@ PROJECT_ROOT = os.getcwd()
 MODELS_DIR = os.path.join(PROJECT_ROOT, "models")
 
 # Collect faster-whisper model files (tiny, small, medium)
-# Exclude .cache junk and duplicate small100 formats (keep only ONNX)
+# Exclude .cache junk, __pycache__, .locks, empty blobs dirs
 model_data = []
 if os.path.isdir(MODELS_DIR):
     for root, dirs, files in os.walk(MODELS_DIR):
-        # Skip .cache directories
+        # Skip junk dirs
+        dirname = os.path.basename(root)
+        if dirname in (".cache", "__pycache__", ".locks", "blobs"):
+            dirs[:] = []  # Don't descend
+            continue
         if ".cache" in root or "__pycache__" in root:
             continue
-        # For small100, bundle ONNX + safetensors + tokenizer/config, skip only pytorch_model.bin
+        # For small100, bundle ONLY pytorch_model.bin + tokenizer/config
+        # Skip model.onnx (1.86GB) and model.safetensors (1.33GB) — both redundant
         if "small100" in root:
-            keep_exts = {".onnx", ".safetensors", ".json", ".model", ".py", ".txt", ".gitattributes"}
+            keep_exts = {".bin", ".json", ".model", ".py", ".txt", ".gitattributes"}
             for f in files:
                 ext = os.path.splitext(f)[1].lower()
                 if ext not in keep_exts:
@@ -36,6 +41,10 @@ if os.path.isdir(MODELS_DIR):
                 src = os.path.join(root, f)
                 dst = os.path.relpath(root, PROJECT_ROOT)
                 model_data.append((src, dst))
+            # Skip .cache dirs inside small100
+            for d in list(dirs):
+                if d in (".cache", "__pycache__"):
+                    dirs.remove(d)
         else:
             for f in files:
                 src = os.path.join(root, f)
