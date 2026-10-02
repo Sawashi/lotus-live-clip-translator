@@ -15,9 +15,8 @@ Works with YouTube, Netflix, VLC, MP4 files, Bilibili, Twitch, browser audio, de
 - **Floating Subtitle Overlay** - Always-on-top, frameless, transparent, click-through mode
 - **Bilingual Display** - Show original + translated text simultaneously
 - **Customizable** - Font size, color, opacity, line spacing, themes
-- **Lightweight** - Under 1 GB RAM, under 15% CPU on mid-range hardware
 
-## Requirements
+## Minimum requirements
 
 - Windows 10 or 11 (64-bit)
 - 4 GB RAM minimum, 8 GB recommended
